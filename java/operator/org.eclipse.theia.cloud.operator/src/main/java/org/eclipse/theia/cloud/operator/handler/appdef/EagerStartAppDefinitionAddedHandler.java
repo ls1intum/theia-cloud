@@ -133,13 +133,91 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
             /* Create missing configmaps for this app definition */
             for (int instance : missingProxyIds) {
                 createAndApplyProxyConfigMap(client.kubernetes(), client.namespace(), correlationId,
-                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition,
-                        labelsToAdd);
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
             }
             for (int instance : missingEmailIds) {
                 createAndApplyEmailConfigMap(client.kubernetes(), client.namespace(), correlationId,
-                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition,
-                        labelsToAdd);
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
+            }
+        }
+
+        /* Get existing deployments for this app definition */
+        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
+                appDefinitionResourceName, appDefinitionResourceUID);
+
+        /* Compute missing deployments */
+        Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDefinition,
+                correlationId, instances, existingDeployments);
+
+        /* Create missing deployments for this app definition */
+        for (int instance : missingDeploymentIds) {
+            createAndApplyDeployment(client.kubernetes(), client.namespace(), correlationId, appDefinitionResourceName,
+                    appDefinitionResourceUID, instance, appDefinition, arguments.isUseKeycloak(), labelsToAdd);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean appDefinitionModified(AppDefinition appDefinition, String correlationId) {
+        AppDefinitionSpec spec = appDefinition.getSpec();
+        LOGGER.info(formatLogMessage(correlationId, "Handling " + spec));
+
+        String appDefinitionResourceName = appDefinition.getMetadata().getName();
+        String appDefinitionResourceUID = appDefinition.getMetadata().getUid();
+        int instances = spec.getMinInstances();
+
+        /* Create ingress if not existing */
+        if (!TheiaCloudIngressUtil.checkForExistingIngressAndAddOwnerReferencesIfMissing(client.kubernetes(),
+                client.namespace(), appDefinition, correlationId)) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Expected ingress '" + spec.getIngressname() + "' for app definition '" + appDefinitionResourceName
+                            + "' does not exist. Abort handling app definition."));
+            return false;
+        } else {
+            LOGGER.trace(formatLogMessage(correlationId, "Ingress available already"));
+        }
+
+        /* Get existing services for this app definition */
+        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
+                appDefinitionResourceName, appDefinitionResourceUID);
+
+        /* Compute missing services */
+        Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDefinition, correlationId,
+                instances, existingServices);
+
+        Map<String, String> labelsToAdd = new HashMap<String, String>();
+
+        /* Create missing services for this app definition */
+        for (int instance : missingServiceIds) {
+            createAndApplyService(client.kubernetes(), client.namespace(), correlationId, appDefinitionResourceName,
+                    appDefinitionResourceUID, instance, appDefinition, arguments.isUseKeycloak(), labelsToAdd);
+        }
+
+        if (arguments.isUseKeycloak()) {
+            /* Get existing configmaps for this app definition */
+            List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                    appDefinitionResourceName, appDefinitionResourceUID);
+            List<ConfigMap> existingProxyConfigMaps = existingConfigMaps.stream()//
+                    .filter(configmap -> LABEL_VALUE_PROXY.equals(configmap.getMetadata().getLabels().get(LABEL_KEY)))//
+                    .collect(Collectors.toList());
+            List<ConfigMap> existingEmailsConfigMaps = existingConfigMaps.stream()//
+                    .filter(configmap -> LABEL_VALUE_EMAILS.equals(configmap.getMetadata().getLabels().get(LABEL_KEY)))//
+                    .collect(Collectors.toList());
+
+            /* Compute missing configmaps */
+            Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDefinition,
+                    correlationId, instances, existingProxyConfigMaps);
+            Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDefinition,
+                    correlationId, instances, existingEmailsConfigMaps);
+
+            /* Create missing configmaps for this app definition */
+            for (int instance : missingProxyIds) {
+                createAndApplyProxyConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
+            }
+            for (int instance : missingEmailIds) {
+                createAndApplyEmailConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
             }
         }
 
@@ -177,8 +255,7 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
             return;
         }
         K8sUtil.loadAndCreateServiceWithOwnerReference(client, namespace, correlationId, serviceYaml, AppDefinition.API,
-                AppDefinition.KIND, appDefinitionResourceName, appDefinitionResourceUID, 0,
-                labelsToAdd);
+                AppDefinition.KIND, appDefinitionResourceName, appDefinitionResourceUID, 0, labelsToAdd);
     }
 
     protected void createAndApplyDeployment(NamespacedKubernetesClient client, String namespace, String correlationId,
@@ -199,8 +276,7 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
         }
         K8sUtil.loadAndCreateDeploymentWithOwnerReference(client, namespace, correlationId, deploymentYaml,
                 AppDefinition.API, AppDefinition.KIND, appDefinitionResourceName, appDefinitionResourceUID, 0,
-                labelsToAdd,
-                deployment -> {
+                labelsToAdd, deployment -> {
                     bandwidthLimiter.limit(deployment, appDefinition.getSpec().getDownlinkLimit(),
                             appDefinition.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
@@ -228,8 +304,7 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
         }
         K8sUtil.loadAndCreateConfigMapWithOwnerReference(client, namespace, correlationId, configMapYaml,
                 AppDefinition.API, AppDefinition.KIND, appDefinitionResourceName, appDefinitionResourceUID, 0,
-                labelsToAdd,
-                configMap -> {
+                labelsToAdd, configMap -> {
                     String host = arguments.getInstancesHost() + ingressPathProvider.getPath(appDefinition, instance);
                     int port = appDefinition.getSpec().getPort();
                     AddedHandlerUtil.updateProxyConfigMap(client, namespace, configMap, host, port);

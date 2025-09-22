@@ -19,6 +19,7 @@ import { LaunchApp } from './components/LaunchApp';
 import { SelectApp } from './components/SelectApp';
 import { Loading } from './components/Loading';
 import { LoginButton } from './components/LoginButton';
+import { VantaBackground } from './components/VantaBackground';
 
 // global state to be kept between render calls
 let initialized = false;
@@ -359,47 +360,49 @@ function App(): JSX.Element {
 
   return (
     <div className='App'>
-      {config.useKeycloak ? (
-        <Header email={email} authenticate={authenticate} logoutUrl={logoutUrl} />
-      ) : (
-        <div className='header'></div>
-      )}
-      <div className='body'>
-        {loading ? (
-          <Loading logoFileExtension={logoFileExtension} text={config.loadingText} />
+        <VantaBackground>
+        {config.useKeycloak ? (
+          <Header email={email} authenticate={authenticate} logoutUrl={logoutUrl} />
         ) : (
-          <div>
+          <div className='header'></div>
+        )}
+        <div className='body'>
+          {loading ? (
+            <Loading logoFileExtension={logoFileExtension} text={config.loadingText} />
+          ) : (
             <div>
-              <AppLogo fileExtension={logoFileExtension} />
-              <h1 className="App__title">Theia Cloud</h1>
-              <p>
-                {needsLogin ? (
-                  <LoginButton login={authenticate} />
-                ) : autoStart ? (
-                  <LaunchApp
-                    appName={selectedAppName}
-                    appDefinition={selectedAppDefinition}
-                    onStartSession={handleStartSession}
-                  />
-                ) : (
-                  <SelectApp appDefinitions={config.additionalApps} onStartSession={handleStartSession} />
-                )}
-              </p>
+              <div>
+                <AppLogo fileExtension={logoFileExtension} />
+                <h1 className="App__title">Theia Cloud</h1>
+                <p>
+                  {needsLogin ? (
+                    <LoginButton login={authenticate} />
+                  ) : autoStart ? (
+                    <LaunchApp
+                      appName={selectedAppName}
+                      appDefinition={selectedAppDefinition}
+                      onStartSession={handleStartSession}
+                    />
+                  ) : (
+                    <SelectApp appDefinitions={config.additionalApps} onStartSession={handleStartSession} />
+                  )}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
-        <ErrorComponent message={error} />
-        {!error && (
-          <Info
-            usesLogin={config.useKeycloak}
-            disable={config.disableInfo}
-            text={config.infoText}
-            title={config.infoTitle}
-          />
-        )}
-        <Footer selectedAppDefinition={autoStart ? selectedAppDefinition : ''} />
+          )}
+          <ErrorComponent message={error} />
+          {!error && (
+            <Info
+              usesLogin={config.useKeycloak}
+              disable={config.disableInfo}
+              text={config.infoText}
+              title={config.infoTitle}
+            />
+          )}
+          <Footer selectedAppDefinition={autoStart ? selectedAppDefinition : ''} />
+        </div>
+        </VantaBackground>
       </div>
-    </div>
   );
 }
 

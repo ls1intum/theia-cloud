@@ -1,8 +1,8 @@
 .App {
-  background-image: url('./resources/background-image.png');
-  background-size: cover;
-  background-repeat: no-repeat;
+  background-color: #2a2a40;
   font-family: 'Anonymous Pro', monospace;
+  position: relative;
+  z-index: 1;
 }
 
 .body {
@@ -12,7 +12,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 10px 20px 40px;
+  padding: 0px 20px 0px;
 }
 
 .App__logo {
@@ -26,10 +26,14 @@
 .App__title {
   font-size: 2.5rem;
   font-weight: 700;
-  color: #2c3e50;
+  color: #ffffff;
   margin: 0.5rem 0 1.5rem 0;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-shadow: 0 2px 4px rgba(255, 255, 255, 0.5);
   letter-spacing: 1px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.5rem 1rem;
+  border-radius: 12px;
+  backdrop-filter: blur(5px);
 }
 
 .App__try-now-button {
@@ -69,16 +73,16 @@
 .App__grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  padding: 32px;
-  max-width: 1000px;
-  margin: 1rem auto;
+  gap: 20px;
+  padding: 24px;
+  max-width: 800px;
+  margin: 0.5rem auto 1rem auto;
 }
 
 .App__grid-item {
-  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-  color: #2c3e50;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(30, 30, 50, 0.9);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 24px;
   font-size: 16px;
   cursor: pointer;
@@ -91,23 +95,23 @@
   justify-content: center;
   font-family: 'Anonymous Pro';
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(15px);
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(5px);
 }
 
 .App__grid-item:hover {
   transform: translateY(-8px) scale(1.02);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(135deg, #ffffff0e 0%, #ffffff0e 100%);
   color: white;
-  border-color: transparent;
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .App__grid-item:hover .App__grid-item-logo {
   transform: scale(1.1);
-  filter: brightness(0) invert(1);
 }
 
 .App__grid-item:active {
@@ -121,6 +125,7 @@
   margin-bottom: 16px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   object-fit: contain;
+  filter: brightness(0.9) contrast(1.1);
 }
 
 .App__grid-item-text {
@@ -143,33 +148,86 @@
   width: 60vw;
   line-height: 1.5em;
   padding-top: 2em;
+  color: #ff6b6b;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  font-weight: 500;
 }
 
 .App__info-message {
   width: 60vw;
   line-height: 1.5em;
-  padding-top: 2em;
+  padding-top: 0em;
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.App__info-message h2 {
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.App__info-message p {
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .App__footer {
   display: flex;
-  padding: 1.5em 0 1em 0;
+  padding: 0em 0 0.5em 0;
   gap: 2em;
-  margin-top: auto;
+  margin-top: 0em;
   width: 100%;
   justify-content: center;
   font-size: 0.9em;
-  color: #666;
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.App__footer a {
+  color: #8bb4ff;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.App__footer a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.App__footer__legal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.App__footer__link {
+  color: #8bb4ff;
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
+}
+
+.App__footer__link:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.App__footer__separator {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85rem;
 }
 
 .Loading__description {
   padding-top: 3em;
+  color: #ffffff;
 }
 
 /* Responsive design for tablets */
 @media (max-width: 768px) {
   .body {
-    padding: 10px 15px 30px;
+    padding: 10px 15px 10px;
   }
 
   .App__logo {
@@ -188,8 +246,8 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 16px;
     padding: 20px;
-    margin: 0.5rem auto;
-    max-width: 500px;
+    margin: 0.3rem auto 0.8rem auto;
+    max-width: 450px;
   }
 
   .App__grid-item {
@@ -206,7 +264,7 @@
 
 @media (max-width: 480px) {
   .body {
-    padding: 8px 10px 20px;
+    padding: 8px 10px 5px;
   }
 
   .App__logo {
@@ -225,8 +283,8 @@
     grid-template-columns: 1fr;
     gap: 12px;
     padding: 16px;
-    margin: 0.3rem auto;
-    max-width: 300px;
+    margin: 0.2rem auto 0.5rem auto;
+    max-width: 280px;
   }
 
   .App__grid-item {

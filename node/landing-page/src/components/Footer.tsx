@@ -16,6 +16,12 @@ export const Footer = ({ selectedAppDefinition }: FooterProps): JSX.Element => (
         report an issue
       </a>
       .
+
+      <div className='App__footer__legal'>
+      <a href='/imprint' className='App__footer__link'>Imprint</a>
+      <span className='App__footer__separator'>|</span>
+      <a href='/privacy' className='App__footer__link'>Privacy</a>
+    </div>
     </p>
   </div>
 );

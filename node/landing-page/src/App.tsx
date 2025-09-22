@@ -371,6 +371,7 @@ function App(): JSX.Element {
           <div>
             <div>
               <AppLogo fileExtension={logoFileExtension} />
+              <h1 className="App__title">Theia Cloud</h1>
               <p>
                 {needsLogin ? (
                   <LoginButton login={authenticate} />

@@ -206,7 +206,7 @@ function App(): JSX.Element {
 
   /* eslint-enable react-hooks/rules-of-hooks */
 
-  document.title = `🎓 TUM Theia Cloud`;
+  document.title = `TUM Theia Cloud`;
 
   const authenticate = (): void => {
     const keycloak = new Keycloak(keycloakConfig);

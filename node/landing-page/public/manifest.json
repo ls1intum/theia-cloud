@@ -1,6 +1,6 @@
 {
-  "short_name": "Theia Cloud",
-  "name": "Theia Cloud - Try Now",
+  "short_name": "TUM Theia Cloud",
+  "name": "🎓 TUM Theia Cloud - Online IDE",
   "icons": [
     {
       "src": "assets/logos/theia-logo.png",

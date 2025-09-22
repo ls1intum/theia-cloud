@@ -18,7 +18,7 @@ export const Footer = ({ selectedAppDefinition }: FooterProps): JSX.Element => (
       .
 
       <div className='App__footer__legal'>
-      <a href='/imprint' className='App__footer__link'>Imprint</a>
+      <a href='https://ase-website-test.ase.cit.tum.de/' target='_blank' rel='noreferrer' className='App__footer__link'>Imprint</a>
       <span className='App__footer__separator'>|</span>
       <a href='/privacy' className='App__footer__link'>Privacy</a>
     </div>

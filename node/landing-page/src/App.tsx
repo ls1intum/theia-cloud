@@ -144,6 +144,12 @@ function App(): JSX.Element {
       }
     }
 
+    // Set default user for anonymous mode when Keycloak is disabled
+    if (!config.useKeycloak && !urlParams.has('user')) {
+      const randomId = Math.random().toString(36).substring(2, 10);
+      setUser(`anonymous-${randomId}`);
+    }
+
     if (config.useKeycloak) {
       keycloakConfig = {
         url: config.keycloakAuthUrl,
@@ -189,10 +195,6 @@ function App(): JSX.Element {
       return;
     }
 
-    if (!config.useKeycloak && !user) {
-      console.log('No user set yet but required for anonymous mode');
-      return;
-    }
 
     console.log('App init or username changed');
     console.log('Selected app definition: ' + selectedAppDefinition);

@@ -223,7 +223,7 @@ function App(): JSX.Element {
 
   document.title = `TUM Theia Cloud`;
 
-  const authenticate = (): void => {
+  const authenticate: () => void = (): void => {
     const keycloak = new Keycloak(keycloakConfig);
 
     keycloak

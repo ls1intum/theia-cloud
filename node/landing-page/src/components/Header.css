@@ -42,34 +42,30 @@
 /* Button and link styles */
 .header__login-btn,
 .header__logout-btn {
-  background: none;
-  border: none;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
   cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
   transition: all 0.3s ease;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  line-height: 1;
+  margin: 0;
+  min-height: 2.5rem;
 }
 
 .header__login-btn:hover,
 .header__logout-btn:hover {
-  background: var(--color-background-card);
+  background: var(--color-text-secondary);
+  color: var(--color-background);
   transform: translateY(-1px);
-}
-
-.header__login-btn svg,
-.header__logout-btn svg {
-  fill: var(--color-text-primary);
-  height: 2rem;
-  width: 2rem;
-  transition: fill 0.3s ease;
-}
-
-.header__login-btn:hover svg,
-.header__logout-btn:hover svg {
-  fill: var(--color-text-secondary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .header__user-info {

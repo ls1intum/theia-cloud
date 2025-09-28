@@ -1,5 +1,39 @@
+:root {
+  /* Text colors */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #8bb4ff;
+  --color-text-muted: rgba(255, 255, 255, 0.7);
+  
+  /* Background colors */
+  --color-background: #2a2a40;
+  --color-background-card: rgba(30, 30, 50, 0.9);
+  
+  /* Border colors */
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-hover: rgba(255, 255, 255, 0.3);
+  
+  /* Button colors */
+  --color-button-background: #383838;
+  --color-button-hover: #484848;
+  --color-button-disabled: #f5f5f5;
+  --color-button-text: #ffffff;
+  --color-button-text-disabled: rgba(0, 0, 0, 0.2);
+  
+  /* Error colors */
+  --color-error: #ff6b6b;
+  
+  /* Shadow colors */
+  --color-shadow: rgba(0, 0, 0, 0.3);
+  --color-shadow-hover: rgba(0, 0, 0, 0.4);
+  
+  /* Vanta.js colors (for reference) */
+  --vanta-bg: #2a2a40;
+  --vanta-color1: #667eea;
+  --vanta-color2: #764ba2;
+}
+
 .App {
-  background-color: #2a2a40;
+  background-color: var(--color-background);
   font-family: 'Anonymous Pro', monospace;
   position: relative;
   z-index: 1;
@@ -26,7 +60,7 @@
 .App__title {
   font-size: 2.5rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--color-text-primary);
   margin: 0.5rem 0 1.5rem 0;
   text-shadow: 0 2px 4px rgba(255, 255, 255, 0.5);
   letter-spacing: 1px;
@@ -39,16 +73,15 @@
 .App__try-now-button {
   display: inline-block;
   padding: 1.3rem 3rem;
-  color: inherit;
+  color: var(--color-button-text);
   text-decoration: none;
   border: 2px solid;
   border-radius: 10rem;
   transition: all 0.3s;
   font-weight: 500;
   outline: none;
-  color: #fff;
-  background: #383838;
-  border-color: #383838;
+  background: var(--color-button-background);
+  border-color: var(--color-button-background);
   font-family: 'Anonymous Pro';
   font-size: medium;
 }
@@ -57,12 +90,14 @@
 .App__try-now-button:focus {
   text-decoration: none;
   transform: translateY(-3px);
-  box-shadow: 0 0.8rem 1.6rem rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0.8rem 1.6rem var(--color-shadow);
+  background: var(--color-button-hover);
+  border-color: var(--color-button-hover);
 }
 
 .App__try-now-button:disabled {
-  background-color: #f5f5f5;
-  color: rgba(0, 0, 0, 0.2);
+  background-color: var(--color-button-disabled);
+  color: var(--color-button-text-disabled);
   border-color: rgba(0, 0, 0, 0.3);
   cursor: default;
   box-shadow: none;
@@ -80,9 +115,9 @@
 }
 
 .App__grid-item {
-  background: rgba(30, 30, 50, 0.9);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-background-card);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
   padding: 24px;
   font-size: 16px;
   cursor: pointer;
@@ -95,7 +130,7 @@
   justify-content: center;
   font-family: 'Anonymous Pro';
   font-weight: 500;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 32px var(--color-shadow);
   backdrop-filter: blur(15px);
   position: relative;
   overflow: hidden;
@@ -104,10 +139,10 @@
 
 .App__grid-item:hover {
   transform: translateY(-8px) scale(1.02);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 40px var(--color-shadow-hover);
   background: linear-gradient(135deg, #ffffff0e 0%, #ffffff0e 100%);
-  color: white;
-  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
 }
 
 .App__grid-item:hover .App__grid-item-logo {
@@ -148,7 +183,7 @@
   width: 60vw;
   line-height: 1.5em;
   padding-top: 2em;
-  color: #ff6b6b;
+  color: var(--color-error);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   font-weight: 500;
 }
@@ -157,17 +192,17 @@
   width: 60vw;
   line-height: 1.5em;
   padding-top: 0em;
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .App__info-message h2 {
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .App__info-message p {
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
@@ -179,18 +214,18 @@
   width: 100%;
   justify-content: center;
   font-size: 0.9em;
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .App__footer a {
-  color: #8bb4ff;
+  color: var(--color-text-secondary);
   text-decoration: none;
   transition: color 0.3s ease;
 }
 
 .App__footer a:hover {
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-decoration: underline;
 }
 
@@ -203,25 +238,25 @@
 }
 
 .App__footer__link {
-  color: #8bb4ff;
+  color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 0.85rem;
   transition: color 0.3s ease;
 }
 
 .App__footer__link:hover {
-  color: #ffffff;
+  color: var(--color-text-primary);
   text-decoration: underline;
 }
 
 .App__footer__separator {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-muted);
   font-size: 0.85rem;
 }
 
 .Loading__description {
   padding-top: 3em;
-  color: #ffffff;
+  color: var(--color-text-primary);
 }
 
 /* Responsive design for tablets */

@@ -10,33 +10,27 @@ window.theiaCloudConfig = {
   additionalApps: [
     {
       appId: "c-latest",
-      appName: "C",
-      logo: '/assets/logos/c-logo.png'
+      appName: "C"
     },
     {
       appId: "java-17-latest", 
-      appName: "Java",
-      logo: '/assets/logos/java-logo.png'
+      appName: "Java"
     },
     {
       appId: "javascript-latest",
-      appName: "Javascript",
-      logo: '/assets/logos/javascript-logo.png'
+      appName: "Javascript"
     },
     {
       appId: "ocaml-latest",
-      appName: "Ocaml",
-      logo: '/assets/logos/ocaml-logo.png'
+      appName: "Ocaml"
     },
     {
       appId: "python-latest",
-      appName: "Python",
-      logo: '/assets/logos/python-logo.png'
+      appName: "Python"
     },
     {
       appId: "rust-latest",
-      appName: "Rust",
-      logo: '/assets/logos/rust-logo.png'
+      appName: "Rust"
     }
   ],
   disableInfo: false,

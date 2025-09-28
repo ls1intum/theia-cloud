@@ -1,14 +1,18 @@
 import React from 'react';
 import './Imprint.css';
 
-export const Imprint: React.FC = () => {
+interface ImprintProps {
+  onNavigate?: (page: 'home' | 'imprint' | 'privacy') => void;
+}
+
+export const Imprint: React.FC<ImprintProps> = ({ onNavigate }) => {
   return (
     <div className='imprint'>
       <div className='imprint__container'>
         <div className='imprint__header'>
           <h1>Imprint</h1>
           <p>Legal information for TUM Theia Cloud</p>
-          <button onClick={() => window.history.back()} className='imprint__back-btn'>← Back</button>
+          <button onClick={() => onNavigate ? onNavigate('home') : window.history.back()} className='imprint__back-btn'>← Back</button>
         </div>
 
         <div className='imprint__content'>

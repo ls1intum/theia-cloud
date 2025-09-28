@@ -1,14 +1,18 @@
 import React from 'react';
 import './Privacy.css';
 
-export const Privacy: React.FC = () => {
+interface PrivacyProps {
+  onNavigate?: (page: 'home' | 'imprint' | 'privacy') => void;
+}
+
+export const Privacy: React.FC<PrivacyProps> = ({ onNavigate }) => {
   return (
     <div className='privacy'>
       <div className='privacy__container'>
         <div className='privacy__header'>
           <h1>Privacy Policy</h1>
           <p>Data protection information for TUM Theia Cloud</p>
-          <button onClick={() => window.history.back()} className='privacy__back-btn'>← Back</button>
+          <button onClick={() => onNavigate ? onNavigate('home') : window.history.back()} className='privacy__back-btn'>← Back</button>
         </div>
 
         <div className='privacy__content'>

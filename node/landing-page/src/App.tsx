@@ -37,15 +37,38 @@ function App(): JSX.Element {
 
   // Handle URL routing
   useEffect(() => {
-    const path = window.location.pathname;
-    if (path === '/imprint') {
-      setCurrentPage('imprint');
-    } else if (path === '/privacy') {
-      setCurrentPage('privacy');
-    } else {
-      setCurrentPage('home');
-    }
+    const updatePageFromUrl = () => {
+      const path = window.location.pathname;
+      if (path === '/imprint') {
+        setCurrentPage('imprint');
+      } else if (path === '/privacy') {
+        setCurrentPage('privacy');
+      } else {
+        setCurrentPage('home');
+      }
+    };
+
+    // Initial load
+    updatePageFromUrl();
+
+    // Listen for browser back/forward navigation
+    window.addEventListener('popstate', updatePageFromUrl);
+
+    return () => {
+      window.removeEventListener('popstate', updatePageFromUrl);
+    };
   }, []);
+
+  // Navigation handler that updates both state and URL
+  const handleNavigation = (page: 'home' | 'imprint' | 'privacy') => {
+    const path = page === 'home' ? '/' : `/${page}`;
+    
+    // Update URL without page reload
+    window.history.pushState({}, '', path);
+    
+    // Update state
+    setCurrentPage(page);
+  };
 
   if (config === undefined) {
     return (
@@ -378,7 +401,7 @@ function App(): JSX.Element {
     return (
       <div className='App'>
         <VantaBackground>
-          <Imprint />
+          <Imprint onNavigate={handleNavigation} />
         </VantaBackground>
       </div>
     );
@@ -388,7 +411,7 @@ function App(): JSX.Element {
     return (
       <div className='App'>
         <VantaBackground>
-          <Privacy />
+          <Privacy onNavigate={handleNavigation} />
         </VantaBackground>
       </div>
     );
@@ -439,7 +462,7 @@ function App(): JSX.Element {
         </div>
         <Footer 
           selectedAppDefinition={autoStart ? selectedAppDefinition : ''} 
-          onNavigate={setCurrentPage}
+          onNavigate={handleNavigation}
         />
         </VantaBackground>
       </div>

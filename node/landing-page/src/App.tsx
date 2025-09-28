@@ -361,19 +361,20 @@ function App(): JSX.Element {
   return (
     <div className='App'>
         <VantaBackground>
-        {config.useKeycloak ? (
-          <Header email={email} authenticate={authenticate} logoutUrl={logoutUrl} />
-        ) : (
-          <div className='header'></div>
-        )}
+        <Header 
+          email={config.useKeycloak ? email : undefined} 
+          authenticate={config.useKeycloak ? authenticate : undefined} 
+          logoutUrl={config.useKeycloak ? logoutUrl : undefined} 
+        />
         <div className='body'>
           {loading ? (
             <Loading logoFileExtension={logoFileExtension} text={config.loadingText} />
           ) : (
             <div>
               <div>
+                <div style={{ marginTop: '2rem' }}></div>
                 <AppLogo fileExtension={logoFileExtension} />
-                <h1 className="App__title">Theia Cloud</h1>
+                <h2 className="App__title">Choose your Online IDE</h2>
                 <p>
                   {needsLogin ? (
                     <LoginButton login={authenticate} />
@@ -399,8 +400,8 @@ function App(): JSX.Element {
               title={config.infoTitle}
             />
           )}
-          <Footer selectedAppDefinition={autoStart ? selectedAppDefinition : ''} />
         </div>
+        <Footer selectedAppDefinition={autoStart ? selectedAppDefinition : ''} />
         </VantaBackground>
       </div>
   );

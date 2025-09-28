@@ -1,9 +1,10 @@
 /* eslint-disable max-len */
 import './Header.css';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   email: string | undefined;
-  authenticate: () => void;
+  authenticate: (() => void) | undefined;
   logoutUrl: string | undefined;
 }
 
@@ -24,18 +25,22 @@ const getGravatarUrl = (email: string, size: number = 40): string => {
 
 export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Element => (
   <div className='header'>
-    {email ? (
-      <div className='header__user-info'>
-        <img 
-          src={getGravatarUrl(email, 40)} 
-          alt="User Avatar" 
-          className='header__avatar'
-        />
-        <span className='header__email'>{email}</span>
-      </div>
-    ) : (
-      <p>
-        <a onClick={authenticate}>
+    <div className='header__app-name'>
+      <h1 className='header__title'>TUM Theia Cloud</h1>
+    </div>
+    <div className='header__actions'>
+      <ThemeToggle />
+      {email ? (
+        <div className='header__user-info'>
+          <img 
+            src={getGravatarUrl(email, 40)} 
+            alt="User Avatar" 
+            className='header__avatar'
+          />
+          <span className='header__email'>{email}</span>
+        </div>
+      ) : authenticate ? (
+        <button className='header__login-btn' onClick={authenticate}>
           <svg>
             <title>login</title>
             <path
@@ -43,12 +48,10 @@ export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Ele
               d='M12.219 26.156h6.094c1.156 0 2.125-0.406 2.875-1.188 0.75-0.75 1.219-1.75 1.219-2.875v-12.219c0-1.125-0.469-2.125-1.219-2.875s-1.75-1.188-2.875-1.188h-6.094v2.563h6.094c0.875 0 1.531 0.656 1.531 1.5v12.219c0 0.844-0.656 1.531-1.531 1.531h-6.094v2.531zM0 13.563v4.875c0 0.563 0.469 1.031 1.031 1.031h5.688v3.844c0 0.344 0.156 0.625 0.469 0.781 0.125 0.031 0.281 0.031 0.344 0.031 0.219 0 0.406-0.063 0.563-0.219l7.344-7.344c0.281-0.281 0.25-0.844 0-1.156l-7.344-7.313c-0.25-0.25-0.563-0.281-0.906-0.188-0.313 0.156-0.469 0.406-0.469 0.75v3.875h-5.688c-0.563 0-1.031 0.469-1.031 1.031z'
             ></path>
           </svg>
-        </a>
-      </p>
-    )}
-    {logoutUrl && (
-      <p>
-        <a href={logoutUrl}>
+        </button>
+      ) : null}
+      {logoutUrl && (
+        <a href={logoutUrl} className='header__logout-btn'>
           <svg>
             <title>logout</title>
             <path
@@ -57,7 +60,7 @@ export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Ele
             ></path>
           </svg>
         </a>
-      </p>
-    )}
+      )}
+    </div>
   </div>
 );

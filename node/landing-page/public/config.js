@@ -33,9 +33,9 @@ window.theiaCloudConfig = {
       appName: "Rust"
     }
   ],
-  disableInfo: false,
-  infoText: 'We are offering a online programming environment perfectly tailored for your project, please log in to continue.',
-  infoTitle: 'Welcome to Theia - the Online IDE for Artemis',
+  disableInfo: true,
+  infoText: '',
+  infoTitle: '',
   loadingText: 'Preparing your personal Online IDE...',
   logoFileExtension: 'png',
   // Keycloak configuration - only used when useKeycloak: true

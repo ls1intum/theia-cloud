@@ -49,6 +49,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     // Update CSS variables based on theme
     const root = document.documentElement;
     
+    // Set data-theme attribute for CSS selectors
+    root.setAttribute('data-theme', theme);
+    
     if (theme === 'dark') {
       // Dark theme colors
       root.style.setProperty('--color-text-primary', '#ffffff');

@@ -20,6 +20,8 @@ import { SelectApp } from './components/SelectApp';
 import { Loading } from './components/Loading';
 import { LoginButton } from './components/LoginButton';
 import { VantaBackground } from './components/VantaBackground';
+import { Imprint } from './components/Imprint';
+import { Privacy } from './components/Privacy';
 
 // global state to be kept between render calls
 let initialized = false;
@@ -31,6 +33,19 @@ function App(): JSX.Element {
   const [config] = useState(() => getTheiaCloudConfig());
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState<'home' | 'imprint' | 'privacy'>('home');
+
+  // Handle URL routing
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path === '/imprint') {
+      setCurrentPage('imprint');
+    } else if (path === '/privacy') {
+      setCurrentPage('privacy');
+    } else {
+      setCurrentPage('home');
+    }
+  }, []);
 
   if (config === undefined) {
     return (
@@ -358,6 +373,27 @@ function App(): JSX.Element {
   const needsLogin = config.useKeycloak && !token;
   const logoFileExtension = config.logoFileExtension ?? 'svg';
 
+  // Render different pages based on currentPage state
+  if (currentPage === 'imprint') {
+    return (
+      <div className='App'>
+        <VantaBackground>
+          <Imprint />
+        </VantaBackground>
+      </div>
+    );
+  }
+
+  if (currentPage === 'privacy') {
+    return (
+      <div className='App'>
+        <VantaBackground>
+          <Privacy />
+        </VantaBackground>
+      </div>
+    );
+  }
+
   return (
     <div className='App'>
         <VantaBackground>
@@ -401,7 +437,10 @@ function App(): JSX.Element {
             />
           )}
         </div>
-        <Footer selectedAppDefinition={autoStart ? selectedAppDefinition : ''} />
+        <Footer 
+          selectedAppDefinition={autoStart ? selectedAppDefinition : ''} 
+          onNavigate={setCurrentPage}
+        />
         </VantaBackground>
       </div>
   );

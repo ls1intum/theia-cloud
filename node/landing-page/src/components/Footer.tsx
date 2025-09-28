@@ -1,8 +1,19 @@
 interface FooterProps {
   selectedAppDefinition: string;
+  onNavigate?: (page: 'home' | 'imprint' | 'privacy') => void;
 }
 
-export const Footer = ({ selectedAppDefinition }: FooterProps): JSX.Element => (
+export const Footer = ({ selectedAppDefinition, onNavigate }: FooterProps): JSX.Element => {
+  const handleNavigation = (page: 'home' | 'imprint' | 'privacy') => {
+    if (onNavigate) {
+      onNavigate(page);
+    } else {
+      // Fallback to URL navigation
+      window.location.href = page === 'home' ? '/' : `/${page}`;
+    }
+  };
+
+  return (
   <div className='App__footer'>
     { selectedAppDefinition != '' && (
       <p>
@@ -18,9 +29,9 @@ export const Footer = ({ selectedAppDefinition }: FooterProps): JSX.Element => (
       <div className='App__footer__legal'>
         <a href='https://ase-website-test.ase.cit.tum.de/' target='_blank' rel='noreferrer' className='App__footer__link'>About</a>
         <span className='App__footer__separator'>|</span>
-        <a href='https://ase-website-test.ase.cit.tum.de/' target='_blank' rel='noreferrer' className='App__footer__link'>Imprint</a>
+        <button onClick={() => handleNavigation('imprint')} className='App__footer__link App__footer__button'>Imprint</button>
         <span className='App__footer__separator'>|</span>
-        <a href='/privacy' className='App__footer__link'>Privacy</a>
+        <button onClick={() => handleNavigation('privacy')} className='App__footer__link App__footer__button'>Privacy</button>
       </div>
       
       <div className='App__footer__version'>
@@ -32,4 +43,5 @@ export const Footer = ({ selectedAppDefinition }: FooterProps): JSX.Element => (
       </div>
     </div>
   </div>
-);
+  );
+};

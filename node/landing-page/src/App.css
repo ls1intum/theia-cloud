@@ -243,6 +243,23 @@
   text-decoration: underline;
 }
 
+.App__footer__button {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color 0.3s ease;
+}
+
+.App__footer__button:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
 .App__footer__separator {
   color: var(--color-text-muted);
   font-size: 0.85rem;

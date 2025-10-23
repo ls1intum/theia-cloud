@@ -152,6 +152,8 @@
 .App__grid-item-logo {
   max-width: 60px;
   max-height: 60px;
+  aspect-ratio: 1;
+  width: 100%;
   margin-bottom: 16px;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   object-fit: contain;

@@ -15,6 +15,7 @@ export const SelectApp: React.FC<SelectAppProps> = ({
           key={index}
           className='App__grid-item'
           onClick={() => onStartSession(app.appId)}
+          data-testid={`launch-app-${app.appId}`}
         >
           <img src={`/assets/logos/${app.appName.toLowerCase()}-logo.png`} alt={`${app.appName} logo`} className='App__grid-item-logo' />
           <div className='App__grid-item-launch'>Launch</div>

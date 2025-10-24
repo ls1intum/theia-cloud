@@ -48,6 +48,7 @@ export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Ele
         <button 
           className='header__logout-btn'
           onClick={() => window.location.href = logoutUrl}
+          data-testid="logoutButton"
         >
           Logout
         </button>

@@ -42,8 +42,8 @@ window.theiaCloudConfig = {
   // All footer links are optional - if not provided, default values will be used
   footerLinks: {
     attribution: {
-      text: 'Built by',
-      url: 'https://github.com/eclipse-theia/theia-cloud',
+      text: 'Built by TUM AET Team 👨‍💻',
+      url: 'https://aet.cit.tum.de/',
       version: 'v1.0.0'
     },
     bugReport: {

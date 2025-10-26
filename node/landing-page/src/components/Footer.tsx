@@ -23,7 +23,12 @@ export const Footer = ({ selectedAppDefinition, onNavigate }: FooterProps): JSX.
     
     <div className='App__footer__content'>
       <div className='App__footer__attribution'>
-        <span>Built by</span> 👨‍💻 <a href='https://github.com/eclipse-theia/theia-cloud' target='_blank' rel='noreferrer'>Theia Cloud Team</a>
+        <span>Built by</span> 👨‍💻 <a href='https://github.com/eclipse-theia/theia-cloud' target='_blank' rel='noreferrer'>Theia Cloud Team</a>{' '}
+        <span>v1.0.0</span>
+      </div>
+      
+      <div className='App__footer__issues'>
+        <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>🐞 Report a bug</a> or <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>💡 Request a feature</a>
       </div>
       
       <div className='App__footer__legal'>
@@ -32,14 +37,6 @@ export const Footer = ({ selectedAppDefinition, onNavigate }: FooterProps): JSX.
         <button onClick={() => handleNavigation('imprint')} className='App__footer__link App__footer__button'>Imprint</button>
         <span className='App__footer__separator'>|</span>
         <button onClick={() => handleNavigation('privacy')} className='App__footer__link App__footer__button'>Privacy</button>
-      </div>
-      
-      <div className='App__footer__version'>
-        <span>v1.0.0</span> • <span>commit: abc1234</span>
-      </div>
-      
-      <div className='App__footer__issues'>
-        Having problems? <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>🐞 Report a bug</a> or <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>💡 Request a feature</a>
       </div>
     </div>
   </div>

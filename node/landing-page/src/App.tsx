@@ -460,9 +460,10 @@ function App(): JSX.Element {
             />
           )}
         </div>
-        <Footer 
-          selectedAppDefinition={autoStart ? selectedAppDefinition : ''} 
+        <Footer
+          selectedAppDefinition={autoStart ? selectedAppDefinition : ''}
           onNavigate={handleNavigation}
+          footerLinks={config.footerLinks}
         />
         </VantaBackground>
       </div>

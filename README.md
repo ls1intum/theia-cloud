@@ -142,3 +142,4 @@ helm uninstall theia-cloud -n theia-cloud
 ## Security
 
 Our Security Vulnerability Process may be found [here](SECURITY.md).
+ 

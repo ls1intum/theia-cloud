@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@eclipse-theiacloud/common": "1.1.0-next",
-    "crypto-js": "^4.2.0",
     "keycloak-js": "25.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -20,7 +19,6 @@
     "vanta": "^0.5.24"
   },
   "devDependencies": {
-    "@types/crypto-js": "^4.2.2",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",

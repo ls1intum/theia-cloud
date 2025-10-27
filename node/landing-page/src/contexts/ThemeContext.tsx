@@ -46,49 +46,9 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   };
 
   useEffect(() => {
-    // Update CSS variables based on theme
+    // Set data-theme attribute for CSS selectors - CSS handles the rest!
     const root = document.documentElement;
-    
-    // Set data-theme attribute for CSS selectors
     root.setAttribute('data-theme', theme);
-    
-    if (theme === 'dark') {
-      // Dark theme colors
-      root.style.setProperty('--color-text-primary', '#ffffff');
-      root.style.setProperty('--color-text-secondary', '#8bb4ff');
-      root.style.setProperty('--color-text-muted', 'rgba(255, 255, 255, 0.7)');
-      root.style.setProperty('--color-background', '#2a2a40');
-      root.style.setProperty('--color-background-card', 'rgba(30, 30, 50, 0.9)');
-      root.style.setProperty('--color-border', 'rgba(255, 255, 255, 0.1)');
-      root.style.setProperty('--color-border-hover', 'rgba(255, 255, 255, 0.3)');
-      root.style.setProperty('--color-button-background', '#383838');
-      root.style.setProperty('--color-button-hover', '#484848');
-      root.style.setProperty('--color-button-disabled', '#f5f5f5');
-      root.style.setProperty('--color-button-text', '#ffffff');
-      root.style.setProperty('--color-button-text-disabled', 'rgba(0, 0, 0, 0.2)');
-      root.style.setProperty('--color-error', '#ff6b6b');
-      root.style.setProperty('--vanta-bg', '#2a2a40');
-      root.style.setProperty('--vanta-color1', '#667eea');
-      root.style.setProperty('--vanta-color2', '#764ba2');
-    } else {
-      // Light theme colors
-      root.style.setProperty('--color-text-primary', '#1a1a1a');
-      root.style.setProperty('--color-text-secondary', '#4a90e2');
-      root.style.setProperty('--color-text-muted', 'rgba(26, 26, 26, 0.7)');
-      root.style.setProperty('--color-background', '#dbdbdb');
-      root.style.setProperty('--color-background-card', '#dbdbdb');
-      root.style.setProperty('--color-border', 'rgba(0, 0, 0, 0.1)');
-      root.style.setProperty('--color-border-hover', 'rgba(0, 0, 0, 0.3)');
-      root.style.setProperty('--color-button-background', '#e9ecef');
-      root.style.setProperty('--color-button-hover', '#dee2e6');
-      root.style.setProperty('--color-button-disabled', '#f5f5f5');
-      root.style.setProperty('--color-button-text', '#1a1a1a');
-      root.style.setProperty('--color-button-text-disabled', 'rgba(0, 0, 0, 0.2)');
-      root.style.setProperty('--color-error', '#dc3545');
-      root.style.setProperty('--vanta-bg', '#f8f9fa');
-      root.style.setProperty('--vanta-color1', '#4a90e2');
-      root.style.setProperty('--vanta-color2', '#6c5ce7');
-    }
   }, [theme]);
 
   return (

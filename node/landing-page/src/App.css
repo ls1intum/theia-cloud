@@ -1,28 +1,58 @@
 :root {
-  /* Text colors */
+  /* Light theme (default) - Text colors */
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #4a90e2;
+  --color-text-muted: rgba(26, 26, 26, 0.7);
+
+  /* Light theme - Background colors */
+  --color-background: #dbdbdb;
+  --color-background-card: #dbdbdb;
+
+  /* Light theme - Border colors */
+  --color-border: rgba(0, 0, 0, 0.1);
+  --color-border-hover: rgba(0, 0, 0, 0.3);
+
+  /* Light theme - Button colors */
+  --color-button-background: #e9ecef;
+  --color-button-hover: #dee2e6;
+  --color-button-disabled: #f5f5f5;
+  --color-button-text: #1a1a1a;
+  --color-button-text-disabled: rgba(0, 0, 0, 0.2);
+
+  /* Light theme - Error colors */
+  --color-error: #dc3545;
+
+  /* Light theme - Vanta.js colors (for reference) */
+  --vanta-bg: #f8f9fa;
+  --vanta-color1: #4a90e2;
+  --vanta-color2: #6c5ce7;
+}
+
+:root[data-theme="dark"] {
+  /* Dark theme - Text colors */
   --color-text-primary: #ffffff;
   --color-text-secondary: #8bb4ff;
   --color-text-muted: rgba(255, 255, 255, 0.7);
 
-  /* Background colors */
+  /* Dark theme - Background colors */
   --color-background: #2a2a40;
   --color-background-card: rgba(30, 30, 50, 0.9);
 
-  /* Border colors */
+  /* Dark theme - Border colors */
   --color-border: rgba(255, 255, 255, 0.1);
   --color-border-hover: rgba(255, 255, 255, 0.3);
 
-  /* Button colors */
+  /* Dark theme - Button colors */
   --color-button-background: #383838;
   --color-button-hover: #484848;
   --color-button-disabled: #f5f5f5;
   --color-button-text: #ffffff;
   --color-button-text-disabled: rgba(0, 0, 0, 0.2);
 
-  /* Error colors */
+  /* Dark theme - Error colors */
   --color-error: #ff6b6b;
 
-  /* Vanta.js colors (for reference) */
+  /* Dark theme - Vanta.js colors (for reference) */
   --vanta-bg: #2a2a40;
   --vanta-color1: #667eea;
   --vanta-color2: #764ba2;

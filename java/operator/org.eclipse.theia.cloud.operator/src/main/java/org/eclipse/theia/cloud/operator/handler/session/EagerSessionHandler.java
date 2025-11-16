@@ -162,6 +162,19 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
+        // If caching is enabled, ensure per-session gradle.properties is created and mounted into the deployment
+        try {
+            client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
+                AddedHandlerUtil.addGradleInitToDeployment(correlationId, client.kubernetes(), client.namespace(),
+                        deployment, session, appDefinition.get(), arguments,
+                        LabelsUtil.createSessionLabels(session, appDefinition.get()));
+                return deployment;
+            });
+        } catch (KubernetesClientException e) {
+            LOGGER.warn(formatLogMessage(correlationId, "Could not add gradle init config to deployment " + deploymentName), e);
+            // non-fatal: continue
+        }
+
         if (arguments.isUseKeycloak()) {
             /* add user to allowed emails */
             try {

@@ -122,6 +122,16 @@ public class TheiaCloudOperatorArguments {
             "--oAuth2ProxyVersion" }, description = "The version to use of the quay.io/oauth2-proxy/oauth2-proxy image.", required = false, defaultValue = "latest")
     private String oAuth2ProxyVersion;
 
+    @Option(names = {
+        "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false
+    })
+    private boolean enableCaching = false;
+
+    @Option(names = {
+        "--cacheUrl" }, description = "The URL of the remote cache server.", required = false
+    )
+    private String cacheUrl;
+
     public boolean isUseKeycloak() {
         return useKeycloak;
     }
@@ -222,6 +232,14 @@ public class TheiaCloudOperatorArguments {
         return oAuth2ProxyVersion;
     }
 
+    public boolean isEnableCaching() {
+        return enableCaching;
+    }
+
+    public String getCacheUrl() {
+        return cacheUrl;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -251,6 +269,8 @@ public class TheiaCloudOperatorArguments {
         result = prime * result + (usePaths ? 1231 : 1237);
         result = prime * result + ((wondershaperImage == null) ? 0 : wondershaperImage.hashCode());
         result = prime * result + ((oAuth2ProxyVersion == null) ? 0 : oAuth2ProxyVersion.hashCode());
+        result = prime * result + (enableCaching ? 1231 : 1237);
+        result = prime * result + ((cacheUrl == null) ? 0 : cacheUrl.hashCode());
         return result;
     }
 
@@ -352,6 +372,13 @@ public class TheiaCloudOperatorArguments {
                 return false;
         } else if (!oAuth2ProxyVersion.equals(other.oAuth2ProxyVersion))
             return false;
+        if (enableCaching != other.enableCaching)
+            return false;
+        if (cacheUrl == null) {
+            if (other.cacheUrl != null)
+                return false;
+        } else if (!cacheUrl.equals(other.cacheUrl))
+            return false;
         return true;
     }
 
@@ -367,7 +394,7 @@ public class TheiaCloudOperatorArguments {
                 + ", keycloakClientId=" + keycloakClientId + ", leaderLeaseDuration=" + leaderLeaseDuration
                 + ", leaderRenewDeadline=" + leaderRenewDeadline + ", leaderRetryPeriod=" + leaderRetryPeriod
                 + ", maxWatchIdleTime=" + maxWatchIdleTime + ", continueOnException=" + continueOnException
-                + ", oAuth2ProxyVersion=" + oAuth2ProxyVersion + "]";
+                + ", oAuth2ProxyVersion=" + oAuth2ProxyVersion + ", enableCaching=" + enableCaching + ", cacheUrl=" + cacheUrl + "]";
     }
 
 }

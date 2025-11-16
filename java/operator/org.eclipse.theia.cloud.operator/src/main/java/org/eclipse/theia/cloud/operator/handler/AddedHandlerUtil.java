@@ -68,6 +68,9 @@ import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.SecretEnvSource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
+import org.eclipse.theia.cloud.common.util.NamingUtil;
+import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
+import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
 
 public final class AddedHandlerUtil {
 
@@ -260,8 +263,8 @@ public final class AddedHandlerUtil {
      * in the operator arguments.
      */
     public static void addGradleInitToDeployment(String correlationId, NamespacedKubernetesClient client,
-            String namespace, Deployment deployment, Session session, AppDefinition appDefinition,
-            TheiaCloudOperatorArguments arguments, Map<String, String> labelsToAdd) {
+                                                 String namespace, Deployment deployment, Session session, AppDefinition appDefinition,
+                                                 TheiaCloudOperatorArguments arguments, Map<String, String> labelsToAdd) {
         if (arguments == null || !arguments.isEnableCaching()) {
             return;
         }

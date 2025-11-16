@@ -123,8 +123,7 @@ public class TheiaCloudOperatorArguments {
     private String oAuth2ProxyVersion;
 
     @Option(names = {
-        "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false
-    })
+        "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false)
     private boolean enableCaching = false;
 
     @Option(names = {

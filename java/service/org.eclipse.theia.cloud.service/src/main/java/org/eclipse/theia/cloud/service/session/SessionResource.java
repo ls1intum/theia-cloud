@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Optional;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.metrics.annotation.Timed;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.TheiaCloudError;
@@ -66,7 +65,6 @@ public class SessionResource extends BaseResource {
     }
 
     @Operation(summary = "Start a new session", description = "Starts a new session for an existing workspace and responds with the URL of the started session.")
-    @Timed(name = "theiacloud_session_startup_seconds", description = "Time taken from REST request to session URL being available.", absolute = true)
     @POST
     @NoAnonymousAccess
     public String start(SessionStartRequest request) {

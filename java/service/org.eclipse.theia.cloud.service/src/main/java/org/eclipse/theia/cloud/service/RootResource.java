@@ -20,6 +20,7 @@ import static org.eclipse.theia.cloud.common.util.NamingUtil.asValidName;
 import java.util.Optional;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.metrics.annotation.Timed;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.TheiaCloudError;
 import org.eclipse.theia.cloud.service.workspace.UserWorkspace;
@@ -54,6 +55,7 @@ public class RootResource extends BaseResource {
     }
 
     @Operation(summary = "Launch Session", description = "Launches a session and creates a workspace if required. Responds with the URL of the launched session.")
+    @Timed(name = "theiacloud_session_startup_seconds", description = "Time taken from REST request to session URL being available.", absolute = true)
     @POST
     public String launch(LaunchRequest request) {
         final EvaluatedRequest evaluatedRequest = evaluateRequest(request);

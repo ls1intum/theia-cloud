@@ -57,6 +57,10 @@ public final class K8sUtil {
 
     protected final Logger logger = Logger.getLogger(getClass());
 
+    public String getNamespace() {
+        return CLIENT.namespace();
+    }
+
     public Workspace createWorkspace(String correlationId, UserWorkspace data) {
         WorkspaceSpec spec = new WorkspaceSpec(data.name, data.label, data.appDefinition, data.user);
         return CLIENT.workspaces().launch(correlationId, spec);

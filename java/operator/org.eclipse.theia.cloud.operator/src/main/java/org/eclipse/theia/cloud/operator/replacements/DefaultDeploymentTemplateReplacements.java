@@ -165,6 +165,31 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         } else {
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_MONITOR_PORT, "");
         }
+
+        // Handle credential bridge port
+        if (appDefinition.getSpec().getOptions() != null && 
+            appDefinition.getSpec().getOptions().containsKey("credentialBridgePort")) {
+            String port = appDefinition.getSpec().getOptions().get("credentialBridgePort");
+            try {
+                int portNumber = Integer.parseInt(port);
+                if (portNumber == appDefinition.getSpec().getPort() || 
+                    (appDefinition.getSpec().getMonitor() != null && 
+                     portNumber == appDefinition.getSpec().getMonitor().getPort())) {
+                    // Just remove the placeholder, otherwise the port would be duplicate
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+                } else {
+                    // Replace the placeholder with the port information
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT,
+                            "- containerPort: " + port + "\n" + "              name: cred-bridge");
+                }
+            } catch (NumberFormatException e) {
+                // Invalid port number, remove placeholder
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+            }
+        } else {
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+        }
+
         return environmentVariables;
     }
 

@@ -17,6 +17,7 @@ spec:
       protocol: TCP
       targetPort: placeholder-port
     placeholder-monitor-port
+    placeholder-credential-bridge-port
   selector:
     app: placeholder-app
   type: ClusterIP

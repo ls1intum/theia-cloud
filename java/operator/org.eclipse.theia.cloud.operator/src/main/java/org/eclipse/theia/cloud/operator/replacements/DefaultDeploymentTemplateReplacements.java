@@ -176,18 +176,23 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
                     (appDefinition.getSpec().getMonitor() != null && 
                      portNumber == appDefinition.getSpec().getMonitor().getPort())) {
                     // Just remove the placeholder, otherwise the port would be duplicate
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
                 } else {
                     // Replace the placeholder with the port information
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT,
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT,
                             "- containerPort: " + port + "\n" + "              name: cred-bridge");
+                    // Set the environment variable value
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, port);
                 }
             } catch (NumberFormatException e) {
                 // Invalid port number, remove placeholder
-                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
             }
         } else {
-            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
         }
 
         return environmentVariables;

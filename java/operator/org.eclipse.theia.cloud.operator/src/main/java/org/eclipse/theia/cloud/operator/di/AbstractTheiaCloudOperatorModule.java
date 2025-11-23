@@ -18,6 +18,7 @@ package org.eclipse.theia.cloud.operator.di;
 
 import java.util.function.Consumer;
 
+import org.eclipse.theia.cloud.common.k8s.client.CredentialBridgeClient;
 import org.eclipse.theia.cloud.common.k8s.client.DefaultTheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
@@ -81,6 +82,7 @@ public abstract class AbstractTheiaCloudOperatorModule extends AbstractModule {
 
         configure(MultiBinding.create(OperatorPlugin.class), this::bindOperatorPlugins);
         bind(MonitorMessagingService.class).to(bindMonitorMessagingService()).in(Singleton.class);
+        bind(CredentialBridgeClient.class).toProvider(CredentialBridgeClientProvider.class).in(Singleton.class);
         bind(TheiaCloudOperatorArguments.class).toInstance(arguments);
     }
 

@@ -31,11 +31,13 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.eclipse.theia.cloud.common.k8s.client.CredentialBridgeClient;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.OperatorStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.ResourceStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
+import org.eclipse.theia.cloud.common.k8s.resource.session.CredentialInjectionResponse;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionStatus;
@@ -91,6 +93,9 @@ public class LazySessionHandler implements SessionHandler {
 
     @Inject
     protected TheiaCloudClient client;
+
+    @Inject
+    protected CredentialBridgeClient credentialBridgeClient;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
@@ -281,6 +286,15 @@ public class LazySessionHandler implements SessionHandler {
                 s.setOperatorMessage("Failed to set session URL.");
             });
             return false;
+        }
+
+          /* Test credential injection */
+        try {
+            injectTestCredentials(session, correlationId);
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Error while injecting test credentials for session: " + sessionResourceName), e);
+            // Continue with session setup even if credential injection fails
         }
 
         client.sessions().updateStatus(correlationId, session, s -> {
@@ -570,6 +584,95 @@ public class LazySessionHandler implements SessionHandler {
                 correlationId);
 
         return true;
+    }
+
+    /**
+     * Waits for the credential bridge to become ready by polling the health
+     * endpoint.
+     * 
+     * @param sessionName   The name of the session
+     * @param correlationId For logging/tracing
+     * @param maxRetries    Maximum number of retry attempts
+     * @param delayMs       Delay between retries in milliseconds
+     * @return true if the bridge becomes ready, false otherwise
+     */
+    protected boolean waitForCredentialBridgeReady(String sessionName, String correlationId, int maxRetries,
+            long delayMs) {
+        LOGGER.info(formatLogMessage(correlationId,
+                "Waiting for credential bridge to become ready for session: " + sessionName + " (max retries: "
+                        + maxRetries + ", delay: " + delayMs + "ms)"));
+        long startTime = System.currentTimeMillis();
+
+        for (int i = 0; i < maxRetries; i++) {
+            if (credentialBridgeClient.healthCheck(sessionName, correlationId)) {
+                long duration = System.currentTimeMillis() - startTime;
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Credential bridge is ready for session: " + sessionName + " (took " + duration
+                                + "ms, attempts: " + (i + 1) + ")"));
+                return true;
+            }
+
+            if (i < maxRetries - 1) {
+                try {
+                    Thread.sleep(delayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    LOGGER.warn(formatLogMessage(correlationId, "Interrupted while waiting for credential bridge"), e);
+                    return false;
+                }
+            }
+        }
+
+        long duration = System.currentTimeMillis() - startTime;
+        LOGGER.warn(formatLogMessage(correlationId,
+                "Credential bridge did not become ready for session: " + sessionName + " after " + maxRetries
+                        + " attempts (" + duration + "ms)"));
+        return false;
+    }
+
+    /**
+     * Injects test credentials into a session (for testing purposes).
+     * 
+     * @param session       The session to inject credentials into
+     * @param correlationId For logging/tracing
+     */
+    protected void injectTestCredentials(Session session, String correlationId) {
+        String sessionName = session.getMetadata().getName();
+
+        // Wait for credential bridge to be ready
+        boolean ready = waitForCredentialBridgeReady(sessionName, correlationId, 30, 2000);
+        if (!ready) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Cannot inject test credentials - credential bridge not ready for session: " + sessionName));
+            return;
+        }
+
+        // Inject test credentials
+        Map<String, String> testCredentials = new HashMap<>();
+        testCredentials.put("lukas", "test");
+
+        LOGGER.info(formatLogMessage(correlationId,
+                "Injecting test credentials into session: " + sessionName + " - credentials: " + testCredentials));
+
+        Optional<CredentialInjectionResponse> response = credentialBridgeClient.injectCredentials(session,
+                testCredentials, correlationId);
+
+        if (response.isPresent()) {
+            CredentialInjectionResponse injectionResponse = response.get();
+            if (injectionResponse.isSuccess()) {
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Successfully injected test credentials into session: " + sessionName + " - message: "
+                                + injectionResponse.getMessage()));
+            } else {
+                LOGGER.error(formatLogMessage(correlationId,
+                        "Failed to inject test credentials into session: " + sessionName + " - error: "
+                                + injectionResponse.getError()));
+            }
+        } else {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Failed to inject test credentials into session: " + sessionName
+                            + " - credential bridge unreachable"));
+        }
     }
 
 }

@@ -47,7 +47,7 @@ spec:
             - containerPort: placeholder-port
               name: application
             placeholder-monitor-port
-            placeholder-credential-bridge-container-port
+            placeholder-data-bridge-container-port
           resources:
             limits:
               cpu: placeholder-cpu-limits
@@ -80,8 +80,8 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
-          - name: CREDENTIAL_BRIDGE_PORT
-            value: placeholder-credential-bridge-env-port
+          - name: DATA_BRIDGE_PORT
+            value: placeholder-data-bridge-env-port
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

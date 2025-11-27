@@ -1,43 +1,43 @@
 package org.eclipse.theia.cloud.common.k8s.client;
 
-import org.eclipse.theia.cloud.common.k8s.resource.session.CredentialInjectionResponse;
+import org.eclipse.theia.cloud.common.k8s.resource.session.DataInjectionResponse;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Client for interacting with the credential bridge service running in session
+ * Client for interacting with the data bridge service running in session
  * pods.
  */
-public interface CredentialBridgeClient {
+public interface DataBridgeClient {
 
     /**
-     * Injects credentials into a session's credential bridge.
+     * Injects data into a session's data bridge.
      * 
      * @param sessionName   The name of the session
-     * @param credentials   Map of environment variable credentials to inject
+     * @param data          Map of environment variable data to inject
      * @param correlationId For logging/tracing
      * @return Response indicating success or failure, or empty if the session or
      *         bridge is unreachable
      */
-    Optional<CredentialInjectionResponse> injectCredentials(String sessionName, Map<String, String> credentials,
+    Optional<DataInjectionResponse> injectData(String sessionName, Map<String, String> data,
             String correlationId);
 
     /**
-     * Injects credentials into a session using the Session object.
+     * Injects data into a session using the Session object.
      * 
      * @param session       The session object
-     * @param credentials   Map of environment variable credentials to inject
+     * @param data          Map of environment variable data to inject
      * @param correlationId For logging/tracing
      * @return Response indicating success or failure, or empty if the bridge is
      *         unreachable
      */
-    Optional<CredentialInjectionResponse> injectCredentials(Session session, Map<String, String> credentials,
+    Optional<DataInjectionResponse> injectData(Session session, Map<String, String> data,
             String correlationId);
 
     /**
-     * Checks if the credential bridge is healthy/reachable.
+     * Checks if the data bridge is healthy/reachable.
      * 
      * @param sessionName   The name of the session
      * @param correlationId For logging/tracing

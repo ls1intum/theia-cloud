@@ -17,7 +17,7 @@ spec:
       protocol: TCP
       targetPort: web
     placeholder-monitor-port
-    placeholder-credential-bridge-port
+    placeholder-data-bridge-port
 
   selector:
     app: placeholder-app

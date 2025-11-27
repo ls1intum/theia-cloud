@@ -5,18 +5,18 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Request object for injecting credentials into a session's credential bridge.
+ * Request object for injecting data into a session's data bridge.
  */
-public class CredentialInjectionRequest {
+public class DataInjectionRequest {
 
     private final Map<String, String> environment;
 
     /**
-     * Creates a credential injection request.
+     * Creates a data injection request.
      * 
-     * @param environment Map of environment variable credentials to inject
+     * @param environment Map of environment variable data to inject
      */
-    public CredentialInjectionRequest(Map<String, String> environment) {
+    public DataInjectionRequest(Map<String, String> environment) {
         this.environment = environment != null ? new HashMap<>(environment) : new HashMap<>();
     }
 
@@ -31,8 +31,8 @@ public class CredentialInjectionRequest {
 
     @Override
     public String toString() {
-        // Don't log actual credential values for security
-        return "CredentialInjectionRequest{" + "environmentKeys=" + environment.keySet() + '}';
+        // Don't log actual data values for security
+        return "DataInjectionRequest{" + "environmentKeys=" + environment.keySet() + '}';
     }
 }
 

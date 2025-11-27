@@ -166,33 +166,33 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_MONITOR_PORT, "");
         }
 
-        // Handle credential bridge port
+        // Handle data bridge port
         if (appDefinition.getSpec().getOptions() != null && 
-            appDefinition.getSpec().getOptions().containsKey("credentialBridgePort")) {
-            String port = appDefinition.getSpec().getOptions().get("credentialBridgePort");
+            appDefinition.getSpec().getOptions().containsKey("dataBridgePort")) {
+            String port = appDefinition.getSpec().getOptions().get("dataBridgePort");
             try {
                 int portNumber = Integer.parseInt(port);
                 if (portNumber == appDefinition.getSpec().getPort() || 
                     (appDefinition.getSpec().getMonitor() != null && 
                      portNumber == appDefinition.getSpec().getMonitor().getPort())) {
                     // Just remove the placeholder, otherwise the port would be duplicate
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
                 } else {
                     // Replace the placeholder with the port information
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT,
-                            "- containerPort: " + port + "\n" + "              name: cred-bridge");
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT,
+                            "- containerPort: " + port + "\n" + "              name: data-bridge");
                     // Set the environment variable value
-                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, port);
+                    environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, port);
                 }
             } catch (NumberFormatException e) {
                 // Invalid port number, remove placeholder
-                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
-                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
             }
         } else {
-            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT, "");
-            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
         }
 
         return environmentVariables;

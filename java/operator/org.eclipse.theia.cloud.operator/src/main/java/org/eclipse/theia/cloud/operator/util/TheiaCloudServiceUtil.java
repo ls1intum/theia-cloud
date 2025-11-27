@@ -78,7 +78,7 @@ public final class TheiaCloudServiceUtil {
         replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_NAMESPACE, namespace);
         replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_PORT, String.valueOf(appDefinition.getSpec().getPort()));
         putMonitorReplacements(appDefinition.getSpec(), replacements);
-        putCredentialBridgeReplacements(appDefinition.getSpec(), replacements);
+        putDataBridgeReplacements(appDefinition.getSpec(), replacements);
         return replacements;
     }
 
@@ -90,7 +90,7 @@ public final class TheiaCloudServiceUtil {
         replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_NAMESPACE, namespace);
         replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_PORT, String.valueOf(appDefinitionSpec.getPort()));
         putMonitorReplacements(appDefinitionSpec, replacements);
-        putCredentialBridgeReplacements(appDefinitionSpec, replacements);
+        putDataBridgeReplacements(appDefinitionSpec, replacements);
         return replacements;
     }
 
@@ -111,28 +111,28 @@ public final class TheiaCloudServiceUtil {
         }
     }
 
-    private static void putCredentialBridgeReplacements(AppDefinitionSpec appDefinitionSpec, Map<String, String> replacements) {
-        // Check if credential bridge port is specified in options
-        if (appDefinitionSpec.getOptions() != null && appDefinitionSpec.getOptions().containsKey("credentialBridgePort")) {
-            String port = appDefinitionSpec.getOptions().get("credentialBridgePort");
+    private static void putDataBridgeReplacements(AppDefinitionSpec appDefinitionSpec, Map<String, String> replacements) {
+        // Check if data bridge port is specified in options
+        if (appDefinitionSpec.getOptions() != null && appDefinitionSpec.getOptions().containsKey("dataBridgePort")) {
+            String port = appDefinitionSpec.getOptions().get("dataBridgePort");
             try {
                 int portNumber = Integer.parseInt(port);
                 if (portNumber == appDefinitionSpec.getPort() || 
                 (appDefinitionSpec.getMonitor() != null && portNumber == appDefinitionSpec.getMonitor().getPort())) {
                     // Just remove the placeholder, otherwise the port would be duplicate
-                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
                 } else {
                     // Replace the placeholder with the port information
-                    String replacement = "- name: credential-bridge\n" + "      port: " + port + "\n" + "      targetPort: "
+                    String replacement = "- name: data-bridge\n" + "      port: " + port + "\n" + "      targetPort: "
                             + port + "\n" + "      protocol: TCP";
-                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, replacement);
+                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, replacement);
                 }
             } catch (NumberFormatException e) {
                 // Invalid port number, remove placeholder
-                replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+                replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
             }
         } else {
-            replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_CREDENTIAL_BRIDGE_PORT, "");
+            replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
         }
     }
 

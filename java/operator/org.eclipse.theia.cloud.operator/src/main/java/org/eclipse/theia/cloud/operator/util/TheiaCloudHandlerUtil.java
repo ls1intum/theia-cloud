@@ -44,9 +44,9 @@ public final class TheiaCloudHandlerUtil {
     public static final String PLACEHOLDER_CONFIGNAME = "placeholder-configname";
 
     public static final String PLACEHOLDER_MONITOR_PORT = "placeholder-monitor-port";
-    public static final String PLACEHOLDER_CREDENTIAL_BRIDGE_PORT = "placeholder-credential-bridge-port";
-    public static final String PLACEHOLDER_CREDENTIAL_BRIDGE_CONTAINER_PORT = "placeholder-credential-bridge-container-port";
-    public static final String PLACEHOLDER_CREDENTIAL_BRIDGE_ENV_PORT = "placeholder-credential-bridge-env-port";
+    public static final String PLACEHOLDER_DATA_BRIDGE_PORT = "placeholder-data-bridge-port";
+    public static final String PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT = "placeholder-data-bridge-container-port";
+    public static final String PLACEHOLDER_DATA_BRIDGE_ENV_PORT = "placeholder-data-bridge-env-port";
 
     private TheiaCloudHandlerUtil() {
     }

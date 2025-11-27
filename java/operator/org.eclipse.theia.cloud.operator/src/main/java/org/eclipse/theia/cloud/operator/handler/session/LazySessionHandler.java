@@ -31,13 +31,13 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.eclipse.theia.cloud.common.k8s.client.CredentialBridgeClient;
+import org.eclipse.theia.cloud.common.k8s.client.DataBridgeClient;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.OperatorStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.ResourceStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
-import org.eclipse.theia.cloud.common.k8s.resource.session.CredentialInjectionResponse;
+import org.eclipse.theia.cloud.common.k8s.resource.session.DataInjectionResponse;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionStatus;
@@ -95,7 +95,7 @@ public class LazySessionHandler implements SessionHandler {
     protected TheiaCloudClient client;
 
     @Inject
-    protected CredentialBridgeClient credentialBridgeClient;
+    protected DataBridgeClient dataBridgeClient;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
@@ -288,13 +288,13 @@ public class LazySessionHandler implements SessionHandler {
             return false;
         }
 
-          /* Test credential injection */
+          /* Test data injection */
         try {
-            injectTestCredentials(session, correlationId);
+            injectTestData(session, correlationId);
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Error while injecting test credentials for session: " + sessionResourceName), e);
-            // Continue with session setup even if credential injection fails
+                    "Error while injecting test data for session: " + sessionResourceName), e);
+            // Continue with session setup even if data injection fails
         }
 
         client.sessions().updateStatus(correlationId, session, s -> {
@@ -587,7 +587,7 @@ public class LazySessionHandler implements SessionHandler {
     }
 
     /**
-     * Waits for the credential bridge to become ready by polling the health
+     * Waits for the data bridge to become ready by polling the health
      * endpoint.
      * 
      * @param sessionName   The name of the session
@@ -596,18 +596,18 @@ public class LazySessionHandler implements SessionHandler {
      * @param delayMs       Delay between retries in milliseconds
      * @return true if the bridge becomes ready, false otherwise
      */
-    protected boolean waitForCredentialBridgeReady(String sessionName, String correlationId, int maxRetries,
+    protected boolean waitForDataBridgeReady(String sessionName, String correlationId, int maxRetries,
             long delayMs) {
         LOGGER.info(formatLogMessage(correlationId,
-                "Waiting for credential bridge to become ready for session: " + sessionName + " (max retries: "
+                "Waiting for data bridge to become ready for session: " + sessionName + " (max retries: "
                         + maxRetries + ", delay: " + delayMs + "ms)"));
         long startTime = System.currentTimeMillis();
 
         for (int i = 0; i < maxRetries; i++) {
-            if (credentialBridgeClient.healthCheck(sessionName, correlationId)) {
+            if (dataBridgeClient.healthCheck(sessionName, correlationId)) {
                 long duration = System.currentTimeMillis() - startTime;
                 LOGGER.info(formatLogMessage(correlationId,
-                        "Credential bridge is ready for session: " + sessionName + " (took " + duration
+                        "Data bridge is ready for session: " + sessionName + " (took " + duration
                                 + "ms, attempts: " + (i + 1) + ")"));
                 return true;
             }
@@ -617,7 +617,7 @@ public class LazySessionHandler implements SessionHandler {
                     Thread.sleep(delayMs);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    LOGGER.warn(formatLogMessage(correlationId, "Interrupted while waiting for credential bridge"), e);
+                    LOGGER.warn(formatLogMessage(correlationId, "Interrupted while waiting for data bridge"), e);
                     return false;
                 }
             }
@@ -625,53 +625,53 @@ public class LazySessionHandler implements SessionHandler {
 
         long duration = System.currentTimeMillis() - startTime;
         LOGGER.warn(formatLogMessage(correlationId,
-                "Credential bridge did not become ready for session: " + sessionName + " after " + maxRetries
+                "Data bridge did not become ready for session: " + sessionName + " after " + maxRetries
                         + " attempts (" + duration + "ms)"));
         return false;
     }
 
     /**
-     * Injects test credentials into a session (for testing purposes).
+     * Injects test data into a session (for testing purposes).
      * 
-     * @param session       The session to inject credentials into
+     * @param session       The session to inject data into
      * @param correlationId For logging/tracing
      */
-    protected void injectTestCredentials(Session session, String correlationId) {
+    protected void injectTestData(Session session, String correlationId) {
         String sessionName = session.getMetadata().getName();
 
-        // Wait for credential bridge to be ready
-        boolean ready = waitForCredentialBridgeReady(sessionName, correlationId, 30, 2000);
+        // Wait for data bridge to be ready
+        boolean ready = waitForDataBridgeReady(sessionName, correlationId, 30, 2000);
         if (!ready) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Cannot inject test credentials - credential bridge not ready for session: " + sessionName));
+                    "Cannot inject test data - data bridge not ready for session: " + sessionName));
             return;
         }
 
-        // Inject test credentials
-        Map<String, String> testCredentials = new HashMap<>();
-        testCredentials.put("lukas", "test");
+        // Inject test data
+        Map<String, String> testData = new HashMap<>();
+        testData.put("lukas", "test");
 
         LOGGER.info(formatLogMessage(correlationId,
-                "Injecting test credentials into session: " + sessionName + " - credentials: " + testCredentials));
+                "Injecting test data into session: " + sessionName + " - data: " + testData));
 
-        Optional<CredentialInjectionResponse> response = credentialBridgeClient.injectCredentials(session,
-                testCredentials, correlationId);
+        Optional<DataInjectionResponse> response = dataBridgeClient.injectData(session,
+                testData, correlationId);
 
         if (response.isPresent()) {
-            CredentialInjectionResponse injectionResponse = response.get();
+            DataInjectionResponse injectionResponse = response.get();
             if (injectionResponse.isSuccess()) {
                 LOGGER.info(formatLogMessage(correlationId,
-                        "Successfully injected test credentials into session: " + sessionName + " - message: "
+                        "Successfully injected test data into session: " + sessionName + " - message: "
                                 + injectionResponse.getMessage()));
             } else {
                 LOGGER.error(formatLogMessage(correlationId,
-                        "Failed to inject test credentials into session: " + sessionName + " - error: "
+                        "Failed to inject test data into session: " + sessionName + " - error: "
                                 + injectionResponse.getError()));
             }
         } else {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to inject test credentials into session: " + sessionName
-                            + " - credential bridge unreachable"));
+                    "Failed to inject test data into session: " + sessionName
+                            + " - data bridge unreachable"));
         }
     }
 

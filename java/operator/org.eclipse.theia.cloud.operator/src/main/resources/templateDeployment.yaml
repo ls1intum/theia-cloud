@@ -82,6 +82,8 @@ spec:
             value: placeholder-keycloak-env-clientid
           - name: DATA_BRIDGE_PORT
             value: placeholder-data-bridge-env-port
+          - name: THEIA
+            value: 1
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

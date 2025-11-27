@@ -84,6 +84,9 @@ spec:
             value: placeholder-data-bridge-env-port
           - name: THEIA
             value: 1
+          # TODO: Make this depend on the eager/ lazy start strategy
+          - name: SCORPIO_THEIA_ENV_STRATEGY
+            value: data-bridge
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

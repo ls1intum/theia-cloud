@@ -124,10 +124,10 @@ public class TheiaCloudOperatorArguments {
 
     @Option(names = {
         "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false)
-    private boolean enableCaching = false;
+    private boolean enableCaching = true;
 
     @Option(names = {
-        "--cacheUrl" }, description = "The URL of the remote cache server.", required = false
+        "--cacheUrl" }, description = "The URL of the remote cache server.", required = false, defaultValue = "http://theia-shared-cache:5071"
     )
     private String cacheUrl;
 

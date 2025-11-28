@@ -331,7 +331,8 @@ public final class AddedHandlerUtil {
             }
             VolumeMount vm = new VolumeMount();
             vm.setName(volumeName);
-            vm.setMountPath("/home/theia/.gradle");
+            vm.setMountPath("/home/theia/.gradle/gradle.properties");
+            vm.setSubPath("gradle.properties");
             vm.setReadOnly(true);
             container.getVolumeMounts().add(vm);
             podSpec.getContainers().set(idx, container);

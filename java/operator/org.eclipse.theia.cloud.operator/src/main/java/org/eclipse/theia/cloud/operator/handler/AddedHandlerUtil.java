@@ -76,6 +76,13 @@ public final class AddedHandlerUtil {
     public static final String TEMPLATE_CONFIGMAP_YAML = "/templateConfigmap.yaml";
     public static final String TEMPLATE_DEPLOYMENT_YAML = "/templateDeployment.yaml";
     public static final String TEMPLATE_DEPLOYMENT_WITHOUT_AOUTH2_PROXY_YAML = "/templateDeploymentWithoutOAuthProxy.yaml";
+    public static final String TEMPLATE_LS_SERVICE_YAML = "/templateLSService.yaml";
+    public static final String TEMPLATE_LS_DEPLOYMENT_YAML = "/templateLSDeployment.yaml";
+
+    public static final String ENV_LS_JAVA_HOST = "LS_JAVA_HOST";
+    public static final String ENV_LS_JAVA_PORT = "LS_JAVA_PORT";
+    public static final String ENV_LS_RUST_HOST = "LS_RUST_HOST";
+    public static final String ENV_LS_RUST_PORT = "LS_RUST_PORT";
 
     public static final String OAUTH2_PROXY_CFG = "oauth2-proxy.cfg";
 

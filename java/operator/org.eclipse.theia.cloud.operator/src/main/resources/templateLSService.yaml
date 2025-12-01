@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: placeholder-servicename
+  labels:
+    app: placeholder-app
+  namespace: placeholder-namespace
+  ownerReferences:
+    - apiVersion: theia.cloud/v1beta9
+      kind: Session
+      name: placeholder
+      uid: placeholder
+spec:
+  ports:
+    - name: java-ls
+      port: 5556
+      protocol: TCP
+      targetPort: 5556
+    - name: rust-ls
+      port: 5555
+      protocol: TCP
+      targetPort: 5555
+  selector:
+    app: placeholder-app
+  type: ClusterIP

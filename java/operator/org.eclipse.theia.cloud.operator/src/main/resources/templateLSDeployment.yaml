@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placeholder-depname
+  namespace: placeholder-namespace
+  ownerReferences:
+    - apiVersion: theia.cloud/v1beta9
+      kind: Session
+      name: placeholder
+      uid: placeholder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: placeholder-app
+  template:
+    metadata:
+      labels:
+        app: placeholder-app
+    spec:
+      containers:
+        - name: langserver
+          image: placeholder-image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5556
+              name: java-ls
+            - containerPort: 5555
+              name: rust-ls
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"

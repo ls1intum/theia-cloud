@@ -41,6 +41,7 @@ import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.LangServerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
@@ -245,35 +246,15 @@ public class EagerSessionHandler implements SessionHandler {
             String lsImage = appDefinition.get().getSpec().getOptions().get("langserver-image");
             LOGGER.info(formatLogMessage(correlationId, "Found langserver-image option: " + lsImage));
 
-            createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
-                    sessionResourceUID, session, appDefinition.get());
-            createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
-                    sessionResourceUID, session, appDefinition.get(), lsImage);
+            LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get());
+            LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get(), lsImage);
 
             /* Update Theia Deployment with LS env vars */
             try {
                 client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
-                    String lsServiceName = "ls-" + sessionResourceName;
-                    String lsHost = lsServiceName;
-                    String lsPort = "5556"; // Default Java port
-                    String envHostKey = AddedHandlerUtil.ENV_LS_JAVA_HOST;
-                    String envPortKey = AddedHandlerUtil.ENV_LS_JAVA_PORT;
-
-                    if (lsImage.contains("rust")) {
-                        lsPort = "5555";
-                        envHostKey = AddedHandlerUtil.ENV_LS_RUST_HOST;
-                        envPortKey = AddedHandlerUtil.ENV_LS_RUST_PORT;
-                    }
-
-                    List<EnvVar> envVars = deployment.getSpec().getTemplate().getSpec().getContainers().get(0).getEnv();
-                    envVars.removeIf(e -> e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_HOST)
-                            || e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_PORT)
-                            || e.getName().equals(AddedHandlerUtil.ENV_LS_RUST_HOST)
-                            || e.getName().equals(AddedHandlerUtil.ENV_LS_RUST_PORT));
-
-                    envVars.add(new EnvVarBuilder().withName(envHostKey).withValue(lsHost).build());
-                    envVars.add(new EnvVarBuilder().withName(envPortKey).withValue(lsPort).build());
-
+                    LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition.get());
                     return deployment;
                 });
                 LOGGER.info(formatLogMessage(correlationId, "Updated Theia deployment with LS env vars"));
@@ -491,14 +472,7 @@ public class EagerSessionHandler implements SessionHandler {
         }
 
         // Cleanup LS resources
-        String lsResourceName = "ls-" + sessionResourceName;
-        try {
-            client.services().withName(lsResourceName).delete();
-            client.apps().deployments().withName(lsResourceName).delete();
-            LOGGER.info(formatLogMessage(correlationId, "Deleted LS resources: " + lsResourceName));
-        } catch (KubernetesClientException e) {
-            LOGGER.warn(formatLogMessage(correlationId, "Error while deleting LS resources (might be already gone)"), e);
-        }
+        LangServerUtil.deleteLangServerResources(client.kubernetes(), sessionResourceName, correlationId);
 
         return true;
     }
@@ -520,100 +494,4 @@ public class EagerSessionHandler implements SessionHandler {
         });
     }
 
-    protected void createAndApplyLSService(NamespacedKubernetesClient client, String namespace, String correlationId,
-            String sessionResourceName, String sessionResourceUID, Session session, AppDefinition appDefinition) {
-        Map<String, String> replacements = new HashMap<>();
-        replacements.put("placeholder-servicename", "ls-" + sessionResourceName);
-        replacements.put("placeholder-app", "ls-" + sessionResourceName);
-        replacements.put("placeholder-namespace", namespace);
-        replacements.put("placeholder", sessionResourceName); // For ownerRef name and uid (using name as placeholder for uid in template is tricky, but template uses name and uid fields)
-        // Actually, the template uses 'placeholder' for both name and uid in ownerReferences.
-        // We need to be careful. JavaResourceUtil.readResourceAndReplacePlaceholders replaces all occurrences.
-        // Let's check the template again.
-        // ownerReferences:
-        //   - apiVersion: theia.cloud/v1beta9
-        //     kind: Session
-        //     name: placeholder
-        //     uid: placeholder
-        
-        // So 'placeholder' will be replaced by sessionResourceName. But we need UID for uid field.
-        // The current JavaResourceUtil might not support different placeholders for name and uid if they share the same string "placeholder".
-        // However, in my template I used "placeholder" for both.
-        // Wait, I should have used distinct placeholders in my template if I wanted to replace them differently.
-        // But let's look at how K8sUtil.loadAndCreate... works. It often overrides owner references.
-        // K8sUtil.loadAndCreateServiceWithOwnerReference takes ownerRef details as args.
-        // So the template placeholders for ownerRef might be ignored or overwritten by the utility method?
-        // Let's check K8sUtil.loadAndCreateServiceWithOwnerReference signature.
-        
-        // It seems K8sUtil.loadAndCreateServiceWithOwnerReference does NOT take the YAML string and parse it, 
-        // it takes the YAML string, parses it, and THEN adds the owner reference programmatically.
-        // So the ownerReference in the template is just a placeholder that might be overwritten or added to.
-        // Actually, looking at EagerStartAppDefinitionAddedHandler, it uses K8sUtil.loadAndCreateServiceWithOwnerReference.
-        
-        // Let's assume K8sUtil handles the owner reference addition.
-        // I just need to replace the name, namespace, app label.
-        
-        String serviceYaml;
-        try {
-            // We need to handle the fact that "placeholder" is used for multiple things in my template.
-            // In my template:
-            // name: placeholder-servicename
-            // app: placeholder-app
-            // namespace: placeholder-namespace
-            // name: placeholder (in ownerRef)
-            // uid: placeholder (in ownerRef)
-            
-            // If I replace "placeholder" with sessionResourceName, it might affect other things if they contain "placeholder".
-            // "placeholder-servicename" contains "placeholder".
-            // So if I replace "placeholder" with "foo", "placeholder-servicename" becomes "foo-servicename".
-            // That works!
-            
-            // But wait, for UID I need the UID string.
-            // The K8sUtil method adds the owner reference.
-            // public static Service loadAndCreateServiceWithOwnerReference(NamespacedKubernetesClient client, String namespace,
-            //        String correlationId, String yaml, String ownerApiVersion, String ownerKind, String ownerName,
-            //        String ownerUid, int ownerBlockOwnerDeletion, Map<String, String> additionalLabels)
-            
-            // So I don't need to worry about the ownerReference in the template being correct, 
-            // as long as I pass the correct owner info to the K8sUtil method.
-            
-            replacements.put("placeholder-servicename", "ls-" + sessionResourceName);
-            replacements.put("placeholder-app", "ls-" + sessionResourceName);
-            replacements.put("placeholder-namespace", namespace);
-            
-            serviceYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(AddedHandlerUtil.TEMPLATE_LS_SERVICE_YAML,
-                    replacements, correlationId);
-        } catch (IOException | URISyntaxException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Error while adjusting LS service template"), e);
-            return;
-        }
-
-        K8sUtil.loadAndCreateServiceWithOwnerReference(client, namespace, correlationId, serviceYaml,
-                "theia.cloud/v1beta9", "Session", sessionResourceName, sessionResourceUID, 0,
-                Collections.emptyMap());
-    }
-
-    protected void createAndApplyLSDeployment(NamespacedKubernetesClient client, String namespace, String correlationId,
-            String sessionResourceName, String sessionResourceUID, Session session, AppDefinition appDefinition,
-            String lsImage) {
-        Map<String, String> replacements = new HashMap<>();
-        replacements.put("placeholder-depname", "ls-" + sessionResourceName);
-        replacements.put("placeholder-app", "ls-" + sessionResourceName);
-        replacements.put("placeholder-namespace", namespace);
-        replacements.put("placeholder-image", lsImage);
-
-        String deploymentYaml;
-        try {
-            deploymentYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
-                    AddedHandlerUtil.TEMPLATE_LS_DEPLOYMENT_YAML, replacements, correlationId);
-        } catch (IOException | URISyntaxException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Error while adjusting LS deployment template"), e);
-            return;
-        }
-
-        K8sUtil.loadAndCreateDeploymentWithOwnerReference(client, namespace, correlationId, deploymentYaml,
-                "theia.cloud/v1beta9", "Session", sessionResourceName, sessionResourceUID, 0,
-                Collections.emptyMap(), deployment -> {
-                    // No extra processing needed for now
-                });
-    }
+}

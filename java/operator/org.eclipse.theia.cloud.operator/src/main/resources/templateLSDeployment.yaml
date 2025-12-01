@@ -23,9 +23,9 @@ spec:
           image: placeholder-image
           imagePullPolicy: Always
           ports:
-            - containerPort: 5556
+            - containerPort: placeholder-java-port
               name: java-ls
-            - containerPort: 5555
+            - containerPort: placeholder-rust-port
               name: rust-ls
           resources:
             limits:

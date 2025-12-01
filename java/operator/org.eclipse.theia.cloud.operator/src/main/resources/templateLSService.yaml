@@ -13,13 +13,13 @@ metadata:
 spec:
   ports:
     - name: java-ls
-      port: 5556
+      port: placeholder-java-port
       protocol: TCP
-      targetPort: 5556
+      targetPort: placeholder-java-port
     - name: rust-ls
-      port: 5555
+      port: placeholder-rust-port
       protocol: TCP
-      targetPort: 5555
+      targetPort: placeholder-rust-port
   selector:
     app: placeholder-app
   type: ClusterIP

@@ -50,6 +50,7 @@ import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.replacements.DeploymentTemplateReplacements;
 import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.LangServerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudIngressUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudK8sUtil;
@@ -281,6 +282,34 @@ public class LazySessionHandler implements SessionHandler {
                 s.setOperatorMessage("Failed to set session URL.");
             });
             return false;
+        }
+
+        /* External Language Server Support */
+        if (appDefinition.getSpec().getOptions() != null
+                && appDefinition.getSpec().getOptions().containsKey("langserver-image")) {
+            String lsImage = appDefinition.getSpec().getOptions().get("langserver-image");
+            LOGGER.info(formatLogMessage(correlationId, "Found langserver-image option: " + lsImage));
+
+            LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition);
+            LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition, lsImage);
+
+            /* Update Theia Deployment with LS env vars */
+            try {
+                client.kubernetes().apps().deployments().withName(sessionResourceName).edit(deployment -> {
+                    LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition);
+                    return deployment;
+                });
+                LOGGER.info(formatLogMessage(correlationId, "Updated Theia deployment with LS env vars"));
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "Error while updating Theia deployment with LS env vars"), e);
+                client.sessions().updateStatus(correlationId, session, s -> {
+                    s.setOperatorStatus(OperatorStatus.ERROR);
+                    s.setOperatorMessage("Failed to update Theia deployment with LS env vars.");
+                });
+                return false;
+            }
         }
 
         client.sessions().updateStatus(correlationId, session, s -> {
@@ -568,6 +597,12 @@ public class LazySessionHandler implements SessionHandler {
         String path = ingressPathProvider.getPath(optionalAppDefinition.get(), session);
         TheiaCloudIngressUtil.removeIngressRule(client.kubernetes(), client.namespace(), ingress.get(), path,
                 correlationId);
+
+        /* External Language Server Support */
+        if (optionalAppDefinition.get().getSpec().getOptions() != null
+                && optionalAppDefinition.get().getSpec().getOptions().containsKey("langserver-image")) {
+            LangServerUtil.deleteLangServerResources(client.kubernetes(), session.getMetadata().getName(), correlationId);
+        }
 
         return true;
     }

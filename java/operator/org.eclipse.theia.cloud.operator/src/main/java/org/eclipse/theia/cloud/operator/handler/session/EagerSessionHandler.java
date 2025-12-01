@@ -18,6 +18,8 @@ package org.eclipse.theia.cloud.operator.handler.session;
 
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
+import java.io.IOException;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
@@ -37,7 +39,9 @@ import org.eclipse.theia.cloud.common.util.LabelsUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
+import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.LangServerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
@@ -45,6 +49,8 @@ import org.eclipse.theia.cloud.operator.util.TheiaCloudServiceUtil;
 
 import com.google.inject.Inject;
 
+import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceList;
@@ -232,6 +238,30 @@ public class EagerSessionHandler implements SessionHandler {
                     formatLogMessage(correlationId, "Error while editing session " + session.getMetadata().getName()),
                     e);
             return false;
+        }
+
+        /* External Language Server Support */
+        if (appDefinition.get().getSpec().getOptions() != null
+                && appDefinition.get().getSpec().getOptions().containsKey("langserver-image")) {
+            String lsImage = appDefinition.get().getSpec().getOptions().get("langserver-image");
+            LOGGER.info(formatLogMessage(correlationId, "Found langserver-image option: " + lsImage));
+
+            LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get());
+            LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get(), lsImage);
+
+            /* Update Theia Deployment with LS env vars */
+            try {
+                client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
+                    LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition.get());
+                    return deployment;
+                });
+                LOGGER.info(formatLogMessage(correlationId, "Updated Theia deployment with LS env vars"));
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "Error while updating Theia deployment with LS env vars"), e);
+                return false;
+            }
         }
 
         return true;
@@ -441,6 +471,9 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
+        // Cleanup LS resources
+        LangServerUtil.deleteLangServerResources(client.kubernetes(), sessionResourceName, correlationId);
+
         return true;
     }
 
@@ -460,4 +493,5 @@ public class EagerSessionHandler implements SessionHandler {
             return ingressToUpdate;
         });
     }
+
 }

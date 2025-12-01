@@ -10,12 +10,31 @@ import java.util.Optional;
 public final class DataBridgeUtil {
 
     public static final String DATA_BRIDGE_PORT_OPTION = "dataBridgePort";
+    public static final String DATA_BRIDGE_ENABLED_OPTION = "dataBridgeEnabled";
     public static final int DEFAULT_DATA_BRIDGE_PORT = 16281;
     private static final String DATA_PATH = "/data";
     private static final String HEALTH_PATH = "/health";
 
     private DataBridgeUtil() {
         // Utility class
+    }
+
+    /**
+     * Checks if data bridge is enabled for this app definition.
+     * When enabled, env vars are injected at runtime via the data bridge
+     * instead of being set as container environment variables.
+     * 
+     * @param appDefSpec The app definition specification
+     * @return true if data bridge is enabled
+     */
+    public static boolean isDataBridgeEnabled(AppDefinitionSpec appDefSpec) {
+        // if (appDefSpec.getOptions() == null) {
+        //     return false;
+        // }
+        // String value = appDefSpec.getOptions().get(DATA_BRIDGE_ENABLED_OPTION);
+        // return "true".equalsIgnoreCase(value);
+        // TODO: Adapt this logic to remove hardcoding
+        return true;
     }
 
     /**

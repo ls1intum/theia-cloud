@@ -321,6 +321,13 @@ public final class AddedHandlerUtil {
         }
         podSpec.getVolumes().add(volume);
 
+        // Set fsGroup to ensure the theia user can write to .gradle
+        if (podSpec.getSecurityContext() == null) {
+            podSpec.setSecurityContext(new io.fabric8.kubernetes.api.model.PodSecurityContext());
+        }
+        // 101 is the theia group
+        podSpec.getSecurityContext().setFsGroup(101L);
+
         // find the theia container and mount
         Optional<Integer> maybeIdx = findContainerIdxInDeployment(deployment, appDefinition.getSpec().getName());
         if (maybeIdx.isPresent()) {

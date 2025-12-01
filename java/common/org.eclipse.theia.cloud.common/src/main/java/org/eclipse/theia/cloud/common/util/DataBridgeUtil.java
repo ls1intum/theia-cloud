@@ -11,7 +11,7 @@ public final class DataBridgeUtil {
 
     public static final String DATA_BRIDGE_PORT_OPTION = "dataBridgePort";
     public static final int DEFAULT_DATA_BRIDGE_PORT = 16281;
-    private static final String DATA_PATH = "/credentials";
+    private static final String DATA_PATH = "/data";
     private static final String HEALTH_PATH = "/health";
 
     private DataBridgeUtil() {

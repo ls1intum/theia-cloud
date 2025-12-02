@@ -473,8 +473,7 @@ public class LazySessionHandler implements SessionHandler {
                 appDefinition);
 
             // If operator caching is enabled and a cache URL is configured, add per-session gradle properties
-            AddedHandlerUtil.addGradleInitToDeployment(correlationId, client.kubernetes(), client.namespace(),
-                deployment, session, appDefinition, arguments, labelsToAdd);
+            AddedHandlerUtil.configureGradleCaching(correlationId, deployment, appDefinition, arguments);
 
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {

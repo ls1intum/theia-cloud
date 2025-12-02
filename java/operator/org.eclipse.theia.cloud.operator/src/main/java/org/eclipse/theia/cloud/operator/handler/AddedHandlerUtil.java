@@ -258,96 +258,61 @@ public final class AddedHandlerUtil {
     }
 
     /**
-     * Create a per-session ConfigMap containing a global gradle.properties file and mount it into the Theia container
-     * of the given Deployment at /home/theia/.gradle. This only acts when caching is enabled and a cache URL is set
-     * in the operator arguments.
+     * Configure Gradle remote build cache by setting environment variables.
+     * The Gradle init script baked into the image will pick these up automatically.
+     *
+     * Environment variables set:
+     * - GRADLE_REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle)
+     * - GRADLE_REMOTE_CACHE_URL: The cache server URL (only if enabled)
+     * - GRADLE_REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
      */
-    public static void addGradleInitToDeployment(String correlationId, NamespacedKubernetesClient client,
-                                                 String namespace, Deployment deployment, Session session, AppDefinition appDefinition,
-                                                 TheiaCloudOperatorArguments arguments, Map<String, String> labelsToAdd) {
-        if (arguments == null || !arguments.isEnableCaching()) {
-            return;
-        }
-        String cacheUrl = arguments.getCacheUrl();
-        if (cacheUrl == null || cacheUrl.trim().isEmpty()) {
-            return;
-        }
-
-        String configMapName = NamingUtil.createName(session, "gradle-init");
-
-        // build gradle.properties content
-        StringBuilder sb = new StringBuilder();
-        sb.append("org.gradle.caching=true\n");
-        sb.append("org.gradle.caching.remote.enabled=true\n");
-        sb.append("org.gradle.caching.remote.url=").append(cacheUrl).append("\n");
-        sb.append("org.gradle.caching.remote.push=true\n");
-
-        ConfigMap configMap = new ConfigMap();
-        ObjectMeta meta = new ObjectMeta();
-        meta.setName(configMapName);
-        if (labelsToAdd != null) {
-            meta.setLabels(new LinkedHashMap<>(labelsToAdd));
-        }
-        // owner reference so it is cleaned up with the Session
-        OwnerReference ownerRef = TheiaCloudHandlerUtil.createOwnerReference(session.getMetadata().getName(),
-                session.getMetadata().getUid());
-        meta.setOwnerReferences(new ArrayList<OwnerReference>());
-        meta.getOwnerReferences().add(ownerRef);
-        configMap.setMetadata(meta);
-
-        Map<String, String> data = new LinkedHashMap<>();
-        data.put("gradle.properties", sb.toString());
-        configMap.setData(data);
-
-        try {
-            // create or replace the ConfigMap
-            client.configMaps().inNamespace(namespace).createOrReplace(configMap);
-            LOGGER.info(formatLogMessage(correlationId, "Created gradle init ConfigMap " + configMapName));
-        } catch (Exception e) {
-            LOGGER.error(formatLogMessage(correlationId, "Error creating gradle init ConfigMap " + configMapName), e);
-            return;
-        }
-
-        // add volume to pod spec
-        io.fabric8.kubernetes.api.model.PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
-        Volume volume = new Volume();
-        String volumeName = "gradle-init";
-        volume.setName(volumeName);
-        ConfigMapVolumeSource cms = new ConfigMapVolumeSource();
-        cms.setName(configMapName);
-        volume.setConfigMap(cms);
-        if (podSpec.getVolumes() == null) {
-            podSpec.setVolumes(new ArrayList<>());
-        }
-        podSpec.getVolumes().add(volume);
-
-        // Set fsGroup to ensure the theia user can write to .gradle
-        if (podSpec.getSecurityContext() == null) {
-            podSpec.setSecurityContext(new io.fabric8.kubernetes.api.model.PodSecurityContext());
-        }
-        // 101 is the theia group
-        podSpec.getSecurityContext().setFsGroup(101L);
-
-        // find the theia container and mount
+    public static void configureGradleCaching(String correlationId, Deployment deployment,
+                                              AppDefinition appDefinition,
+                                              TheiaCloudOperatorArguments arguments) {
+        // Find the theia container
         Optional<Integer> maybeIdx = findContainerIdxInDeployment(deployment, appDefinition.getSpec().getName());
-        if (maybeIdx.isPresent()) {
-            int idx = maybeIdx.get();
-            Container container = podSpec.getContainers().get(idx);
-            if (container.getVolumeMounts() == null) {
-                container.setVolumeMounts(new ArrayList<>());
-            }
-            VolumeMount vm = new VolumeMount();
-            vm.setName(volumeName);
-            vm.setMountPath("/home/theia/.gradle/gradle.properties");
-            vm.setSubPath("gradle.properties");
-            vm.setReadOnly(true);
-            container.getVolumeMounts().add(vm);
-            podSpec.getContainers().set(idx, container);
+        if (maybeIdx.isEmpty()) {
+            LOGGER.warn(formatLogMessage(correlationId, "Could not find theia container to configure Gradle caching"));
+            return;
+        }
+
+        int idx = maybeIdx.get();
+        Container container = deployment.getSpec().getTemplate().getSpec().getContainers().get(idx);
+
+        // Initialize env list if null
+        if (container.getEnv() == null) {
+            container.setEnv(new ArrayList<>());
+        }
+
+        // Determine if caching should be enabled
+        boolean cachingEnabled = arguments != null
+                && arguments.isEnableCaching()
+                && arguments.getCacheUrl() != null
+                && !arguments.getCacheUrl().trim().isEmpty();
+
+        // Always set the ENABLED variable for explicit control
+        EnvVar cacheEnabledEnv = new EnvVar();
+        cacheEnabledEnv.setName("GRADLE_REMOTE_CACHE_ENABLED");
+        cacheEnabledEnv.setValue(String.valueOf(cachingEnabled));
+        container.getEnv().add(cacheEnabledEnv);
+
+        if (cachingEnabled) {
+            // Set cache URL
+            EnvVar cacheUrlEnv = new EnvVar();
+            cacheUrlEnv.setName("GRADLE_REMOTE_CACHE_URL");
+            cacheUrlEnv.setValue(arguments.getCacheUrl().trim());
+            container.getEnv().add(cacheUrlEnv);
+
+            // Set push permission (default: true, could be made configurable)
+            EnvVar cachePushEnv = new EnvVar();
+            cachePushEnv.setName("GRADLE_REMOTE_CACHE_PUSH");
+            cachePushEnv.setValue("true");
+            container.getEnv().add(cachePushEnv);
+
             LOGGER.info(formatLogMessage(correlationId,
-                    "Mounted gradle init configmap " + configMapName + " into container " + container.getName()));
+                    "Gradle remote cache ENABLED. URL: " + arguments.getCacheUrl()));
         } else {
-            LOGGER.warn(formatLogMessage(correlationId,
-                    "Could not find theia container to mount gradle init configmap " + configMapName));
+            LOGGER.info(formatLogMessage(correlationId, "Gradle remote cache DISABLED"));
         }
     }
 

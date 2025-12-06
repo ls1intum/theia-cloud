@@ -469,8 +469,11 @@ public class LazySessionHandler implements SessionHandler {
                             appDefinition.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
 
-                    AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
-                            appDefinition);
+            AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
+                appDefinition);
+
+            // If operator caching is enabled and a cache URL is configured, add per-session gradle properties
+            AddedHandlerUtil.configureGradleCaching(correlationId, deployment, appDefinition, arguments);
 
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {

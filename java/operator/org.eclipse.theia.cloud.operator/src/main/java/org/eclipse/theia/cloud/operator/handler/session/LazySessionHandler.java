@@ -31,20 +31,17 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.eclipse.theia.cloud.common.k8s.client.DataBridgeClient;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.OperatorStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.ResourceStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
-import org.eclipse.theia.cloud.common.k8s.resource.session.DataInjectionResponse;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionStatus;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.LabelsUtil;
 import org.eclipse.theia.cloud.common.util.TheiaCloudError;
-import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
 import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.bandwidth.BandwidthLimiter;
@@ -94,9 +91,6 @@ public class LazySessionHandler implements SessionHandler {
 
     @Inject
     protected TheiaCloudClient client;
-
-    @Inject
-    protected DataBridgeClient dataBridgeClient;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
@@ -289,17 +283,6 @@ public class LazySessionHandler implements SessionHandler {
             return false;
         }
 
-        /* Runtime credential injection via data bridge (only when enabled) */
-        if (DataBridgeUtil.isDataBridgeEnabled(appDefinitionSpec)) {
-            try {
-                injectSessionEnvVars(session, correlationId);
-            } catch (Exception e) {
-                LOGGER.error(formatLogMessage(correlationId,
-                        "Error while injecting env vars for session: " + sessionResourceName), e);
-                // Continue with session setup even if data injection fails
-            }
-        }
-
         client.sessions().updateStatus(correlationId, session, s -> {
             s.setOperatorStatus(OperatorStatus.HANDLED);
             s.setLastActivity(Instant.now().toEpochMilli());
@@ -486,16 +469,8 @@ public class LazySessionHandler implements SessionHandler {
                             appDefinition.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
 
-                    // Only add env vars to container if data bridge is NOT enabled
-                    // When data bridge is enabled, env vars are injected at runtime
-                    if (!DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec())) {
-                        AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
-                                appDefinition);
-                    } else {
-                        LOGGER.info(formatLogMessage(correlationId,
-                                "Data bridge enabled - skipping container env vars for session: "
-                                        + session.getMetadata().getName()));
-                    }
+                    AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
+                            appDefinition);
 
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {
@@ -597,97 +572,4 @@ public class LazySessionHandler implements SessionHandler {
         return true;
     }
 
-    /**
-     * Waits for the data bridge to become ready by polling the health
-     * endpoint.
-     * 
-     * @param sessionName   The name of the session
-     * @param correlationId For logging/tracing
-     * @param maxRetries    Maximum number of retry attempts
-     * @param delayMs       Delay between retries in milliseconds
-     * @return true if the bridge becomes ready, false otherwise
-     */
-    protected boolean waitForDataBridgeReady(String sessionName, String correlationId, int maxRetries,
-            long delayMs) {
-        LOGGER.info(formatLogMessage(correlationId,
-                "Waiting for data bridge to become ready for session: " + sessionName + " (max retries: "
-                        + maxRetries + ", delay: " + delayMs + "ms)"));
-        long startTime = System.currentTimeMillis();
-
-        for (int i = 0; i < maxRetries; i++) {
-            if (dataBridgeClient.healthCheck(sessionName, correlationId)) {
-                long duration = System.currentTimeMillis() - startTime;
-                LOGGER.info(formatLogMessage(correlationId,
-                        "Data bridge is ready for session: " + sessionName + " (took " + duration
-                                + "ms, attempts: " + (i + 1) + ")"));
-                return true;
-            }
-
-            if (i < maxRetries - 1) {
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    LOGGER.warn(formatLogMessage(correlationId, "Interrupted while waiting for data bridge"), e);
-                    return false;
-                }
-            }
-        }
-
-        long duration = System.currentTimeMillis() - startTime;
-        LOGGER.warn(formatLogMessage(correlationId,
-                "Data bridge did not become ready for session: " + sessionName + " after " + maxRetries
-                        + " attempts (" + duration + "ms)"));
-        return false;
-    }
-
-    /**
-     * Injects environment variables into a session via the data bridge.
-     * This enables runtime credential injection without baking them into container env.
-     * 
-     * @param session       The session to inject data into
-     * @param correlationId For logging/tracing
-     */
-    protected void injectSessionEnvVars(Session session, String correlationId) {
-        String sessionName = session.getMetadata().getName();
-        Map<String, String> envVars = session.getSpec().getEnvVars();
-
-        // Skip if no env vars to inject
-        if (envVars == null || envVars.isEmpty()) {
-            LOGGER.debug(formatLogMessage(correlationId,
-                    "No environment variables to inject for session: " + sessionName));
-            return;
-        }
-
-        // Wait for data bridge to be ready
-        boolean ready = waitForDataBridgeReady(sessionName, correlationId, 30, 2000);
-        if (!ready) {
-            LOGGER.error(formatLogMessage(correlationId,
-                    "Cannot inject env vars - data bridge not ready for session: " + sessionName));
-            return;
-        }
-
-        // Log keys only (not values which may contain secrets)
-        LOGGER.info(formatLogMessage(correlationId,
-                "Injecting env vars into session: " + sessionName + " - keys: " + envVars.keySet()));
-
-        Optional<DataInjectionResponse> response = dataBridgeClient.injectData(session,
-                envVars, correlationId);
-
-        if (response.isPresent()) {
-            DataInjectionResponse injectionResponse = response.get();
-            if (injectionResponse.isSuccess()) {
-                LOGGER.info(formatLogMessage(correlationId,
-                        "Successfully injected env vars into session: " + sessionName));
-            } else {
-                LOGGER.error(formatLogMessage(correlationId,
-                        "Failed to inject env vars into session: " + sessionName + " - error: "
-                                + injectionResponse.getError()));
-            }
-        } else {
-            LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to inject env vars into session: " + sessionName
-                            + " - data bridge unreachable"));
-        }
-    }
 }

@@ -15,12 +15,9 @@ FROM eclipse-temurin:21-jre-alpine
 WORKDIR /service
 COPY --from=builder /service/service/org.eclipse.theia.cloud.service/target/service-1.2.0-SNAPSHOT-runner.jar .
 
-# Support both new and legacy environment variable names
-ENV SERVICE_AUTH_TOKEN default-app-id
-ENV APPID default-app-id
-
 ENV SERVICE_PORT 8081
 
+ENV APPID default-app-id
 
 ENV KEYCLOAK_ENABLE true
 # Keycloak config

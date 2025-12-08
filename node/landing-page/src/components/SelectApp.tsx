@@ -4,10 +4,9 @@ interface SelectAppProps {
   appDefinitions: AppDefinition[] | undefined;
   onStartSession: (appDefinition: string) => void;
 }
-export const SelectApp: React.FC<SelectAppProps> = ({ appDefinitions, onStartSession }: SelectAppProps) => {
-  return (
-    <div className='App__grid'>
-      {appDefinitions &&
+export const SelectApp: React.FC<SelectAppProps> = ({ appDefinitions, onStartSession }: SelectAppProps) => (
+  <div className='App__grid'>
+    {appDefinitions &&
         appDefinitions.map((app, index) => (
           <button
             key={index}
@@ -24,6 +23,5 @@ export const SelectApp: React.FC<SelectAppProps> = ({ appDefinitions, onStartSes
             <div className='App__grid-item-text'>{app.appName}</div>
           </button>
         ))}
-    </div>
-  );
-};
+  </div>
+);

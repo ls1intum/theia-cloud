@@ -28,13 +28,14 @@ public final class DataBridgeUtil {
      * @return true if data bridge is enabled
      */
     public static boolean isDataBridgeEnabled(AppDefinitionSpec appDefSpec) {
-        // if (appDefSpec.getOptions() == null) {
-        //     return false;
-        // }
-        // String value = appDefSpec.getOptions().get(DATA_BRIDGE_ENABLED_OPTION);
-        // return "true".equalsIgnoreCase(value);
-        // TODO: Adapt this logic to remove hardcoding
-        return true;
+        if (appDefSpec.getOptions() == null) {
+            return false;
+        }
+        String value = appDefSpec.getOptions().get(DATA_BRIDGE_ENABLED_OPTION);
+        if (value == null) {
+            return false;
+        }
+        return "true".equalsIgnoreCase(value) || "1".equals(value);
     }
 
     /**
@@ -45,15 +46,19 @@ public final class DataBridgeUtil {
      * @return The data bridge port number
      */
     public static int getDataBridgePort(AppDefinitionSpec appDefSpec) {
-        if (appDefSpec.getOptions() != null
-                && appDefSpec.getOptions().containsKey(DATA_BRIDGE_PORT_OPTION)) {
-            try {
-                return Integer.parseInt(appDefSpec.getOptions().get(DATA_BRIDGE_PORT_OPTION));
-            } catch (NumberFormatException e) {
-                return DEFAULT_DATA_BRIDGE_PORT;
-            }
+        if (appDefSpec.getOptions() == null) {
+            return DEFAULT_DATA_BRIDGE_PORT;
         }
-        return DEFAULT_DATA_BRIDGE_PORT;
+
+        if (!appDefSpec.getOptions().containsKey(DATA_BRIDGE_PORT_OPTION)) {
+            return DEFAULT_DATA_BRIDGE_PORT;
+        }
+
+        try {
+            return Integer.parseInt(appDefSpec.getOptions().get(DATA_BRIDGE_PORT_OPTION));
+        } catch (NumberFormatException e) {
+            return DEFAULT_DATA_BRIDGE_PORT;
+        }
     }
 
     /**

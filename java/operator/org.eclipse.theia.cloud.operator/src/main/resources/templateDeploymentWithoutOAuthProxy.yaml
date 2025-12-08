@@ -69,6 +69,8 @@ spec:
             value: placeholder-keycloak-env-clientid
           - name: DATA_BRIDGE_PORT
             value: placeholder-data-bridge-env-port
+          - name: DATA_BRIDGE_ENABLED
+            value: placeholder-data-bridge-enabled
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

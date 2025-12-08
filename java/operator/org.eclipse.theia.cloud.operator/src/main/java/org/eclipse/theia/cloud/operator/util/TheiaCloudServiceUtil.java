@@ -29,6 +29,7 @@ import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
 import org.eclipse.theia.cloud.common.util.NamingUtil;
 
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -112,28 +113,25 @@ public final class TheiaCloudServiceUtil {
     }
 
     private static void putDataBridgeReplacements(AppDefinitionSpec appDefinitionSpec, Map<String, String> replacements) {
-        // Check if data bridge port is specified in options
-        if (appDefinitionSpec.getOptions() != null && appDefinitionSpec.getOptions().containsKey("dataBridgePort")) {
-            String port = appDefinitionSpec.getOptions().get("dataBridgePort");
-            try {
-                int portNumber = Integer.parseInt(port);
-                if (portNumber == appDefinitionSpec.getPort() || 
-                (appDefinitionSpec.getMonitor() != null && portNumber == appDefinitionSpec.getMonitor().getPort())) {
-                    // Just remove the placeholder, otherwise the port would be duplicate
-                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
-                } else {
-                    // Replace the placeholder with the port information
-                    String replacement = "- name: data-bridge\n" + "      port: " + port + "\n" + "      targetPort: "
-                            + port + "\n" + "      protocol: TCP";
-                    replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, replacement);
-                }
-            } catch (NumberFormatException e) {
-                // Invalid port number, remove placeholder
-                replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
-            }
-        } else {
+        if (!DataBridgeUtil.isDataBridgeEnabled(appDefinitionSpec)) {
             replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
+            return;
         }
+
+        int portNumber = DataBridgeUtil.getDataBridgePort(appDefinitionSpec);
+
+        if (portNumber == appDefinitionSpec.getPort()
+                || (appDefinitionSpec.getMonitor() != null && portNumber == appDefinitionSpec.getMonitor().getPort())) {
+            // Just remove the placeholder, otherwise the port would be duplicate
+            replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, "");
+            return;
+        }
+
+        String port = String.valueOf(portNumber);
+        // Replace the placeholder with the port information
+        String replacement = "- name: data-bridge\n" + "      port: " + port + "\n" + "      targetPort: " + port
+                + "\n" + "      protocol: TCP";
+        replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_PORT, replacement);
     }
 
     public static Optional<Service> getServiceOwnedBySession(String sessionResourceName, String sessionResourceUID,

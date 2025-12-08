@@ -92,6 +92,12 @@ public class DefaultDataBridgeClient implements DataBridgeClient {
             return Optional.empty();
         }
 
+        if (!DataBridgeUtil.isDataBridgeEnabled(appDef.get().getSpec())) {
+            LOGGER.debug(formatLogMessage(correlationId,
+                    "Data bridge disabled for app definition: " + appDefName + ", skipping injection"));
+            return Optional.empty();
+        }
+
         int port = DataBridgeUtil.getDataBridgePort(appDef.get().getSpec());
 
         // Build the URL
@@ -158,8 +164,11 @@ public class DefaultDataBridgeClient implements DataBridgeClient {
         String appDefName = session.get().getSpec().getAppDefinition();
         Optional<AppDefinition> appDef = theiaCloudClient.appDefinitions().get(appDefName);
 
-        int port = appDef.isPresent() ? DataBridgeUtil.getDataBridgePort(appDef.get().getSpec())
-                : DataBridgeUtil.DEFAULT_DATA_BRIDGE_PORT;
+        if (appDef.isEmpty() || !DataBridgeUtil.isDataBridgeEnabled(appDef.get().getSpec())) {
+            return false;
+        }
+
+        int port = DataBridgeUtil.getDataBridgePort(appDef.get().getSpec());
 
         Optional<String> url = DataBridgeUtil.getHealthCheckURL(serviceIP.get(), port);
 

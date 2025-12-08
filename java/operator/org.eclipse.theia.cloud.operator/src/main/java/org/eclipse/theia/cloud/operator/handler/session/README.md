@@ -28,3 +28,4 @@ Prewarmed sessions need to be configured in advance to allow successful data inj
 
 -   `SCORPIO_THEIA_ENV_STRATEGY`: Sets the strategy to use for environment configuration. Must be set to `data-bridge` for prewarmed sessions.
 -   `DATA_BRIDGE_PORT` (optional): Overrides the default port the data bridge component should listen on.
+-   `DATA_BRIDGE_ENABLED`: Must be set to `1` or `true` to enable the data bridge component in prewarmed sessions.

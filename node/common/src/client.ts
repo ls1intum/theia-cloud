@@ -14,6 +14,7 @@ import {
   SessionPerformance,
   SessionPerformanceRequest as ClientSessionPerformanceRequest,
   SessionResourceApi,
+  SessionSetConfigValueRequest as ClientSessionSetConfigValueRequest,
   SessionSpec,
   SessionStartRequest as ClientSessionStartRequest,
   SessionStopRequest as ClientSessionStopRequest,
@@ -49,7 +50,13 @@ export type PingRequest = ClientPingRequest & ServiceRequest;
 export namespace PingRequest {
   export const KIND = 'pingRequest';
 
-  export function create(serviceUrl: string, appId: string): PingRequest {
+  export function create(serviceUrl: string, serviceAuthToken: string): PingRequest {
+    return { serviceUrl, appId: serviceAuthToken };
+  }
+  
+  /** @deprecated Use create() instead */
+  export function createWithAppId(serviceUrl: string, appId: string): PingRequest {
+    console.warn('Using deprecated createWithAppId method. Please migrate to create() with serviceAuthToken.');
     return { serviceUrl, appId };
   }
 }
@@ -60,15 +67,52 @@ export namespace LaunchRequest {
 
   export function ephemeral(
     serviceUrl: string,
+    serviceAuthToken: string,
+    appDefinition: string,
+    timeout?: number,
+    user: string = createUser()
+  ): LaunchRequest {
+    return { serviceUrl, appId: serviceAuthToken, appDefinition, user, ephemeral: true, timeout };
+  }
+
+  export function createWorkspace(
+    serviceUrl: string,
+    serviceAuthToken: string,
+    appDefinition: string,
+    timeout?: number,
+    user: string = createUser(),
+    workspaceName?: string,
+    label?: string
+  ): LaunchRequest {
+    return { serviceUrl, appId: serviceAuthToken, appDefinition, user, label, workspaceName, ephemeral: false, timeout };
+  }
+
+  // eslint-disable-next-line max-len
+  export function existingWorkspace(
+    serviceUrl: string,
+    serviceAuthToken: string,
+    workspaceName: string,
+    timeout?: number,
+    appDefinition?: string,
+    user: string = createUser()
+  ): LaunchRequest {
+    return { serviceUrl, appId: serviceAuthToken, workspaceName, appDefinition, user, timeout };
+  }
+  
+  /** @deprecated Use ephemeral() instead */
+  export function ephemeralWithAppId(
+    serviceUrl: string,
     appId: string,
     appDefinition: string,
     timeout?: number,
     user: string = createUser()
   ): LaunchRequest {
+    console.warn('Using deprecated ephemeralWithAppId method. Please migrate to ephemeral() with serviceAuthToken.');
     return { serviceUrl, appId, appDefinition, user, ephemeral: true, timeout };
   }
 
-  export function createWorkspace(
+  /** @deprecated Use createWorkspace() instead */
+  export function createWorkspaceWithAppId(
     serviceUrl: string,
     appId: string,
     appDefinition: string,
@@ -77,11 +121,12 @@ export namespace LaunchRequest {
     workspaceName?: string,
     label?: string
   ): LaunchRequest {
+    console.warn('Using deprecated createWorkspaceWithAppId method. Please migrate to createWorkspace() with serviceAuthToken.');
     return { serviceUrl, appId, appDefinition, user, label, workspaceName, ephemeral: false, timeout };
   }
 
-  // eslint-disable-next-line max-len
-  export function existingWorkspace(
+  /** @deprecated Use existingWorkspace() instead */
+  export function existingWorkspaceWithAppId(
     serviceUrl: string,
     appId: string,
     workspaceName: string,
@@ -89,6 +134,7 @@ export namespace LaunchRequest {
     appDefinition?: string,
     user: string = createUser()
   ): LaunchRequest {
+    console.warn('Using deprecated existingWorkspaceWithAppId method. Please migrate to existingWorkspace() with serviceAuthToken.');
     return { serviceUrl, appId, workspaceName, appDefinition, user, timeout };
   }
 }
@@ -111,6 +157,11 @@ export namespace SessionStartRequest {
 export type SessionStopRequest = ClientSessionStopRequest & ServiceRequest;
 export namespace SessionStopRequest {
   export const KIND = 'sessionStopRequest';
+}
+
+export type SessionSetConfigValueRequest = ClientSessionSetConfigValueRequest & ServiceRequest;
+export namespace SessionSetConfigValueRequest {
+  export const KIND = 'sessionSetConfigValueRequest';
 }
 
 export type SessionActivityRequest = ClientSessionActivityRequest & ServiceRequest;
@@ -233,6 +284,23 @@ export namespace TheiaCloud {
       );
     }
 
+    export async function setConfigValue(
+      sessionName: string,
+      request: SessionSetConfigValueRequest,
+      options: RequestOptions = {}
+    ): Promise<void> {
+      const { accessToken, retries, timeout } = options;
+      const sessionSetConfigValueRequest = { kind: SessionSetConfigValueRequest.KIND, ...request };
+      return call(
+        () =>
+          sessionApi(request.serviceUrl, accessToken).serviceSessionSessionConfigPost(
+            sessionName,
+            sessionSetConfigValueRequest,
+            createConfig(timeout)
+          ),
+        retries
+      );
+    }
     export async function reportSessionActivity(
       request: SessionActivityRequest,
       options: RequestOptions = {}

@@ -297,7 +297,7 @@ function App(): JSX.Element {
     setError(undefined);
 
     // first check if the service is available. if not we are doing maintenance and should adapt the error message accordingly
-    TheiaCloud.ping(PingRequest.create(config.serviceUrl, config.appId))
+    TheiaCloud.ping(PingRequest.create(config.serviceUrl, TheiaCloudConfig.getServiceAuthToken(config)))
       .then(() => {
         // ping successful continue with launch
         let workspace: string | undefined;

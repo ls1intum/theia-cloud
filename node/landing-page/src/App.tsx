@@ -3,6 +3,7 @@ import './App.css';
 import {
   AppDefinition,
   getTheiaCloudConfig,
+  LaunchRequest,
   PingRequest,
   RequestOptions,
   TheiaCloud,
@@ -376,7 +377,7 @@ function App(): JSX.Element {
               GIT_MAIL: gitMail!
             }
           }
-        };
+        } satisfies LaunchRequest;
 
         // TheiaCloud.launchAndRedirect(
         // config.useEphemeralStorage

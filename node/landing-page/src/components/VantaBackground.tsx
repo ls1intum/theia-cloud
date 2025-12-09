@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { useTheme } from '../contexts/ThemeContext';
 
 interface VantaBackgroundProps {
@@ -22,12 +23,12 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
     const value = getComputedStyle(document.documentElement)
       .getPropertyValue(variableName)
       .trim();
-    
+
     // Convert #rrggbb to 0xrrggbb
     if (value.startsWith('#')) {
       return parseInt(value.slice(1), 16);
     }
-    
+
     // Fallback to default values
     return 0x2a2a40;
   };
@@ -36,13 +37,13 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
     // Check if VANTA and THREE are loaded globally
     if (window.VANTA && window.THREE && vantaRef.current && !vantaEffect) {
       console.log('Initializing Vanta Birds effect...');
-      
+
       try {
         // Get colors from CSS variables
         const backgroundColor = getCSSVariableAsHex('--vanta-bg');
         const color1 = getCSSVariableAsHex('--vanta-color1');
         const color2 = getCSSVariableAsHex('--vanta-color2');
-        
+
         const effect = window.VANTA.BIRDS({
           el: vantaRef.current,
           mouseControls: false,
@@ -63,7 +64,7 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
           cohesion: 45.00,
           quantity: 1.00
         });
-        
+
         if (effect) {
           console.log('Vanta Birds effect initialized successfully');
           setVantaEffect(effect);
@@ -96,7 +97,7 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
         vantaEffect.destroy();
       }
     };
-  }, [])
+  }, []);
 
   // Handle window resize
   useEffect(() => {
@@ -116,7 +117,7 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
       // Destroy existing effect
       vantaEffect.destroy();
       setVantaEffect(null);
-      
+
       // Reinitialize with new colors
       setTimeout(() => {
         initializeVanta();
@@ -135,7 +136,7 @@ export const VantaBackground: React.FC<VantaBackgroundProps> = ({ children }) =>
           width: '100%',
           height: '100%',
           zIndex: -1,
-          background: 'var(--vanta-bg, #2a2a40)', // Fallback background matching VantaJS backgroundColor
+          background: 'var(--vanta-bg, #2a2a40)' // Fallback background matching VantaJS backgroundColor
         }}
       />
       {children}

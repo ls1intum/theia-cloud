@@ -3,9 +3,11 @@ import './App.css';
 import {
   AppDefinition,
   getTheiaCloudConfig,
+  LaunchRequest,
   PingRequest,
   RequestOptions,
-  TheiaCloud
+  TheiaCloud,
+  TheiaCloudConfig
 } from '@eclipse-theiacloud/common';
 import Keycloak, { KeycloakConfig } from 'keycloak-js';
 import { useEffect, useState } from 'react';
@@ -14,14 +16,14 @@ import { AppLogo } from './components/AppLogo';
 import { ErrorComponent } from './components/ErrorComponent';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
+import { Imprint } from './components/Imprint';
 import { Info } from './components/Info';
 import { LaunchApp } from './components/LaunchApp';
-import { SelectApp } from './components/SelectApp';
 import { Loading } from './components/Loading';
 import { LoginButton } from './components/LoginButton';
-import { VantaBackground } from './components/VantaBackground';
-import { Imprint } from './components/Imprint';
 import { Privacy } from './components/Privacy';
+import { SelectApp } from './components/SelectApp';
+import { VantaBackground } from './components/VantaBackground';
 
 // global state to be kept between render calls
 let initialized = false;
@@ -62,10 +64,10 @@ function App(): JSX.Element {
   // Navigation handler that updates both state and URL
   const handleNavigation = (page: 'home' | 'imprint' | 'privacy') => {
     const path = page === 'home' ? '/' : `/${page}`;
-    
+
     // Update URL without page reload
     window.history.pushState({}, '', path);
-    
+
     // Update state
     setCurrentPage(page);
   };
@@ -234,7 +236,6 @@ function App(): JSX.Element {
       return;
     }
 
-
     console.log('App init or username changed');
     console.log('Selected app definition: ' + selectedAppDefinition);
     console.log('Selected app name: ' + selectedAppName);
@@ -260,7 +261,7 @@ function App(): JSX.Element {
 
   /* eslint-enable react-hooks/rules-of-hooks */
 
-  document.title = `TUM Theia Cloud`;
+  document.title = 'TUM Theia Cloud';
 
   const authenticate: () => void = (): void => {
     const keycloak = new Keycloak(keycloakConfig);
@@ -291,13 +292,13 @@ function App(): JSX.Element {
         setError('Authentication failed');
       });
   };
-  
+
   const handleStartSession = (appDefinition: string): void => {
     setLoading(true);
     setError(undefined);
 
     // first check if the service is available. if not we are doing maintenance and should adapt the error message accordingly
-    TheiaCloud.ping(PingRequest.create(config.serviceUrl, config.appId))
+    TheiaCloud.ping(PingRequest.create(config.serviceUrl, TheiaCloudConfig.getServiceAuthToken(config)))
       .then(() => {
         // ping successful continue with launch
         let workspace: string | undefined;
@@ -362,7 +363,7 @@ function App(): JSX.Element {
 
         const launchRequest = {
           serviceUrl: config.serviceUrl,
-          appId: config.appId,
+          appId: TheiaCloudConfig.getServiceAuthToken(config),
           user: config.useKeycloak ? email! : user!,
           appDefinition: appDefinition,
           workspaceName: workspace,
@@ -376,10 +377,10 @@ function App(): JSX.Element {
               GIT_MAIL: gitMail!
             }
           }
-        };
+        } satisfies LaunchRequest;
 
-        //TheiaCloud.launchAndRedirect(
-        //config.useEphemeralStorage
+        // TheiaCloud.launchAndRedirect(
+        // config.useEphemeralStorage
         //  ? LaunchRequest.ephemeral(config.serviceUrl, config.appId, appDefinition, 5, email)
         //  : LaunchRequest.createWorkspace(config.serviceUrl, config.appId, appDefinition, 5, email, workspace),
 
@@ -435,11 +436,11 @@ function App(): JSX.Element {
 
   return (
     <div className='App'>
-        <VantaBackground>
-        <Header 
-          email={config.useKeycloak ? email : undefined} 
-          authenticate={config.useKeycloak ? authenticate : undefined} 
-          logoutUrl={config.useKeycloak ? logoutUrl : undefined} 
+      <VantaBackground>
+        <Header
+          email={config.useKeycloak ? email : undefined}
+          authenticate={config.useKeycloak ? authenticate : undefined}
+          logoutUrl={config.useKeycloak ? logoutUrl : undefined}
         />
         <div className='body'>
           {loading ? (
@@ -481,8 +482,8 @@ function App(): JSX.Element {
           onNavigate={handleNavigation}
           footerLinks={config.footerLinks}
         />
-        </VantaBackground>
-      </div>
+      </VantaBackground>
+    </div>
   );
 }
 

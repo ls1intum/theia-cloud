@@ -1,5 +1,5 @@
 window.theiaCloudConfig = {
-  appId: 'asdfghjkl',
+  appId: 'nJV3nKZmpxTD4wu2',
   appName: 'Theia Blueprint',
   // Set to false for demo/development mode without Keycloak server
   // Set to true when you have a real Keycloak instance running

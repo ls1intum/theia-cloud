@@ -1,5 +1,6 @@
 imagePullPolicy: IfNotPresent
 
+# Legacy app configuration (deprecated - use service.authToken instead)
 app:
   id: asdfghjkl
   name: Theia Blueprint
@@ -8,7 +9,7 @@ issuer:
   email: jfaltermeier@eclipsesource.com
 
 demoApplication:
-  name: theiacloud/theia-cloud-demo:1.1.0-next
+  name: theiacloud/theia-cloud-demo:1.2.0-next
   pullSecret: ""
   timeoutStrategy: "FIXEDTIME"
   timeoutLimit: "30"
@@ -24,7 +25,7 @@ hosts:
     instance: ws
 
 landingPage:
-  image: theiacloud/theia-cloud-landing-page:1.1.0-next
+  image: theiacloud/theia-cloud-landing-page:1.2.0-next
   appDefinition: "theia-cloud-demo"
   ephemeralStorage: true
   additionalApps:
@@ -42,6 +43,7 @@ keycloak:
   cookieSecret: "s-p4GxfRlPa_BI1XsLuvE2ihNOqYD1vmewWcXcpYjr0="
 
 service:
+  authToken: asdfghjkl
   protocol: https
 
 operator:

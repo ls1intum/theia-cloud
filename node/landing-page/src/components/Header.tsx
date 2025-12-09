@@ -1,5 +1,6 @@
 /* eslint-disable max-len */
 import './Header.css';
+
 import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
@@ -32,9 +33,9 @@ export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Ele
       <ThemeToggle />
       {email ? (
         <div className='header__user-info'>
-          <img 
-            src={getGravatarUrl(email, 40)} 
-            alt="User Avatar" 
+          <img
+            src={getGravatarUrl(email, 40)}
+            alt="User Avatar"
             className='header__avatar'
           />
           <span className='header__email'>{email}</span>
@@ -45,7 +46,7 @@ export const Header = ({ email, authenticate, logoutUrl }: HeaderProps): JSX.Ele
         </button>
       ) : null}
       {logoutUrl && (
-        <button 
+        <button
           className='header__logout-btn'
           onClick={() => window.location.href = logoutUrl}
           data-testid="logoutButton"

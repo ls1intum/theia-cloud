@@ -20,11 +20,11 @@ import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessag
 
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -41,6 +41,7 @@ import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudIngressUtil;
+import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudServiceUtil;
 
 import com.google.inject.Inject;
@@ -48,6 +49,7 @@ import com.google.inject.Inject;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 
 /**
@@ -161,6 +163,289 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                     appDefinitionResourceUID, instance, appDefinition, arguments.isUseKeycloak(), labelsToAdd);
         }
         return true;
+    }
+
+    @Override
+    public boolean appDefinitionDeleted(AppDefinition appDefinition, String correlationId) {
+        LOGGER.info(formatLogMessage(correlationId, "Deleting resources for " + appDefinition.getSpec()));
+
+        boolean success = true;
+        String namespace = client.namespace();
+        String appDefinitionResourceName = appDefinition.getMetadata().getName();
+        String appDefinitionResourceUID = appDefinition.getMetadata().getUid();
+
+        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), namespace,
+                appDefinitionResourceName, appDefinitionResourceUID);
+        for (Service service : existingServices) {
+            if (!isOwnedSolelyByAppDefinition(service, appDefinitionResourceName, appDefinitionResourceUID)) {
+                if (hasAdditionalOwners(service, appDefinitionResourceName, appDefinitionResourceUID)) {
+                    removeAppDefinitionOwnerReference(correlationId, service, appDefinitionResourceName,
+                            appDefinitionResourceUID);
+                }
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Skip deleting service " + service.getMetadata().getName() + " because it has other owners"));
+                continue;
+            }
+            try {
+                client.kubernetes().services().inNamespace(namespace).resource(service).delete();
+            } catch (Exception e) {
+                LOGGER.error(formatLogMessage(correlationId,
+                        "Failed deleting service " + service.getMetadata().getName()), e);
+                success = false;
+            }
+        }
+
+        List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), namespace,
+                appDefinitionResourceName, appDefinitionResourceUID);
+        for (ConfigMap configMap : existingConfigMaps) {
+            if (hasAdditionalOwners(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
+                removeAppDefinitionOwnerReference(correlationId, configMap, appDefinitionResourceName,
+                        appDefinitionResourceUID);
+                continue;
+            }
+            try {
+                client.kubernetes().configMaps().inNamespace(namespace).resource(configMap).delete();
+            } catch (Exception e) {
+                LOGGER.error(formatLogMessage(correlationId,
+                        "Failed deleting configmap " + configMap.getMetadata().getName()), e);
+                success = false;
+            }
+        }
+
+        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), namespace,
+                appDefinitionResourceName, appDefinitionResourceUID);
+        for (Deployment deployment : existingDeployments) {
+            if (hasAdditionalOwners(deployment, appDefinitionResourceName, appDefinitionResourceUID)) {
+                removeAppDefinitionOwnerReference(correlationId, deployment, appDefinitionResourceName,
+                        appDefinitionResourceUID);
+                continue;
+            }
+            try {
+                client.kubernetes().apps().deployments().inNamespace(namespace).resource(deployment).delete();
+            } catch (Exception e) {
+                LOGGER.error(formatLogMessage(correlationId,
+                        "Failed deleting deployment " + deployment.getMetadata().getName()), e);
+                success = false;
+            }
+        }
+
+        return success;
+    }
+
+    @Override
+    public boolean appDefinitionModified(AppDefinition appDefinition, String correlationId) {
+        AppDefinitionSpec spec = appDefinition.getSpec();
+        LOGGER.info(formatLogMessage(correlationId, "Reconciling " + spec));
+
+        String appDefinitionResourceName = appDefinition.getMetadata().getName();
+        String appDefinitionResourceUID = appDefinition.getMetadata().getUid();
+        int instances = spec.getMinInstances();
+
+        if (!TheiaCloudIngressUtil.checkForExistingIngressAndAddOwnerReferencesIfMissing(client.kubernetes(),
+                client.namespace(), appDefinition, correlationId)) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Expected ingress '" + spec.getIngressname() + "' for app definition '" + appDefinitionResourceName
+                            + "' does not exist. Abort handling app definition modification."));
+            return false;
+        }
+
+        boolean success = true;
+        Map<String, String> labelsToAdd = new HashMap<String, String>();
+
+        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
+                appDefinitionResourceName, appDefinitionResourceUID);
+        Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDefinition, correlationId,
+                instances, existingServices);
+        for (int instance : missingServiceIds) {
+            createAndApplyService(client.kubernetes(), client.namespace(), correlationId, appDefinitionResourceName,
+                    appDefinitionResourceUID, instance, appDefinition, arguments.isUseKeycloak(), labelsToAdd);
+        }
+        for (Service service : existingServices) {
+            Integer id = TheiaCloudServiceUtil.getId(correlationId, appDefinition, service);
+            if (id != null && id > instances) {
+                if (!isOwnedSolelyByAppDefinition(service, appDefinitionResourceName, appDefinitionResourceUID)) {
+                    if (hasAdditionalOwners(service, appDefinitionResourceName, appDefinitionResourceUID)) {
+                        removeAppDefinitionOwnerReference(correlationId, service, appDefinitionResourceName,
+                                appDefinitionResourceUID);
+                    }
+                    LOGGER.info(formatLogMessage(correlationId, "Skip deleting service "
+                            + service.getMetadata().getName() + " because it has other owners"));
+                    continue;
+                }
+                try {
+                    client.kubernetes().services().inNamespace(client.namespace()).resource(service).delete();
+                } catch (Exception e) {
+                    LOGGER.error(formatLogMessage(correlationId,
+                            "Failed deleting service " + service.getMetadata().getName()), e);
+                    success = false;
+                }
+            }
+        }
+
+        for (int instance : missingServiceIds) {
+            createAndApplyInternalService(client.kubernetes(), client.namespace(), correlationId,
+                    appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
+        }
+
+        if (arguments.isUseKeycloak()) {
+            List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                    appDefinitionResourceName, appDefinitionResourceUID);
+            List<ConfigMap> existingProxyConfigMaps = existingConfigMaps.stream()//
+                    .filter(configmap -> LABEL_VALUE_PROXY.equals(configmap.getMetadata().getLabels().get(LABEL_KEY)))//
+                    .collect(Collectors.toList());
+            List<ConfigMap> existingEmailsConfigMaps = existingConfigMaps.stream()//
+                    .filter(configmap -> LABEL_VALUE_EMAILS.equals(configmap.getMetadata().getLabels().get(LABEL_KEY)))//
+                    .collect(Collectors.toList());
+
+            Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDefinition,
+                    correlationId, instances, existingProxyConfigMaps);
+            Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDefinition,
+                    correlationId, instances, existingEmailsConfigMaps);
+
+            for (int instance : missingProxyIds) {
+                createAndApplyProxyConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
+            }
+            for (int instance : missingEmailIds) {
+                createAndApplyEmailConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                        appDefinitionResourceName, appDefinitionResourceUID, instance, appDefinition, labelsToAdd);
+            }
+
+            for (ConfigMap configMap : existingProxyConfigMaps) {
+                Integer id = TheiaCloudConfigMapUtil.getProxyId(correlationId, appDefinition, configMap);
+                if (id != null && id > instances) {
+                    if (hasAdditionalOwners(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
+                        removeAppDefinitionOwnerReference(correlationId, configMap, appDefinitionResourceName,
+                                appDefinitionResourceUID);
+                        continue;
+                    }
+                    try {
+                        client.kubernetes().configMaps().inNamespace(client.namespace()).resource(configMap).delete();
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed deleting proxy configmap " + configMap.getMetadata().getName()), e);
+                        success = false;
+                    }
+                }
+            }
+            for (ConfigMap configMap : existingEmailsConfigMaps) {
+                Integer id = TheiaCloudConfigMapUtil.getEmailId(correlationId, appDefinition, configMap);
+                if (id != null && id > instances) {
+                    if (hasAdditionalOwners(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
+                        removeAppDefinitionOwnerReference(correlationId, configMap, appDefinitionResourceName,
+                                appDefinitionResourceUID);
+                        continue;
+                    }
+                    try {
+                        client.kubernetes().configMaps().inNamespace(client.namespace()).resource(configMap).delete();
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed deleting email configmap " + configMap.getMetadata().getName()), e);
+                        success = false;
+                    }
+                }
+            }
+        }
+
+        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
+                appDefinitionResourceName, appDefinitionResourceUID);
+        Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDefinition,
+                correlationId, instances, existingDeployments);
+        for (int instance : missingDeploymentIds) {
+            createAndApplyDeployment(client.kubernetes(), client.namespace(), correlationId, appDefinitionResourceName,
+                    appDefinitionResourceUID, instance, appDefinition, arguments.isUseKeycloak(), labelsToAdd);
+        }
+        for (Deployment deployment : existingDeployments) {
+            Integer id = TheiaCloudDeploymentUtil.getId(correlationId, appDefinition, deployment);
+            if (id != null && id > instances) {
+                if (hasAdditionalOwners(deployment, appDefinitionResourceName, appDefinitionResourceUID)) {
+                    removeAppDefinitionOwnerReference(correlationId, deployment, appDefinitionResourceName,
+                            appDefinitionResourceUID);
+                    continue;
+                }
+                try {
+                    client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(deployment).delete();
+                } catch (Exception e) {
+                    LOGGER.error(formatLogMessage(correlationId,
+                            "Failed deleting deployment " + deployment.getMetadata().getName()), e);
+                    success = false;
+                }
+            }
+        }
+
+        return success;
+    }
+
+    private boolean isOwnedSolelyByAppDefinition(Service service, String appDefinitionResourceName,
+            String appDefinitionResourceUID) {
+        List<io.fabric8.kubernetes.api.model.OwnerReference> ownerReferences = service.getMetadata().getOwnerReferences();
+        if (ownerReferences == null || ownerReferences.isEmpty()) {
+            return false;
+        }
+        boolean onlyAppDef = ownerReferences.stream().allMatch(
+                owner -> appDefinitionResourceUID.equals(owner.getUid()) && appDefinitionResourceName.equals(owner.getName()));
+        return onlyAppDef && ownerReferences.size() == 1;
+    }
+
+    private boolean hasAdditionalOwners(io.fabric8.kubernetes.api.model.HasMetadata resource,
+            String appDefinitionResourceName, String appDefinitionResourceUID) {
+        List<OwnerReference> ownerReferences = resource.getMetadata().getOwnerReferences();
+        if (ownerReferences == null || ownerReferences.isEmpty()) {
+            return false;
+        }
+        boolean containsAppDefinition = ownerReferences.stream().anyMatch(owner -> appDefinitionResourceUID.equals(owner.getUid())
+                && appDefinitionResourceName.equals(owner.getName()));
+        boolean hasNonAppDefinitionOwner = ownerReferences.stream().anyMatch(
+                owner -> !(appDefinitionResourceUID.equals(owner.getUid()) && appDefinitionResourceName.equals(owner.getName())));
+        return containsAppDefinition && hasNonAppDefinitionOwner;
+    }
+
+    private void removeAppDefinitionOwnerReference(String correlationId, Service service,
+            String appDefinitionResourceName, String appDefinitionResourceUID) {
+        try {
+            client.kubernetes().services().inNamespace(client.namespace()).resource(service).edit(s -> {
+                TheiaCloudHandlerUtil.removeOwnerReferenceFromItem(correlationId, appDefinitionResourceName,
+                        appDefinitionResourceUID, s);
+                return s;
+            });
+            LOGGER.info(formatLogMessage(correlationId,
+                    "Removed app definition owner from service " + service.getMetadata().getName()));
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Failed removing app definition owner from service " + service.getMetadata().getName()), e);
+        }
+    }
+
+    private void removeAppDefinitionOwnerReference(String correlationId, ConfigMap configMap,
+            String appDefinitionResourceName, String appDefinitionResourceUID) {
+        try {
+            client.kubernetes().configMaps().inNamespace(client.namespace()).resource(configMap).edit(cm -> {
+                TheiaCloudHandlerUtil.removeOwnerReferenceFromItem(correlationId, appDefinitionResourceName,
+                        appDefinitionResourceUID, cm);
+                return cm;
+            });
+            LOGGER.info(formatLogMessage(correlationId,
+                    "Removed app definition owner from configmap " + configMap.getMetadata().getName()));
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Failed removing app definition owner from configmap " + configMap.getMetadata().getName()), e);
+        }
+    }
+
+    private void removeAppDefinitionOwnerReference(String correlationId, Deployment deployment,
+            String appDefinitionResourceName, String appDefinitionResourceUID) {
+        try {
+            client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(deployment).edit(dep -> {
+                TheiaCloudHandlerUtil.removeOwnerReferenceFromItem(correlationId, appDefinitionResourceName,
+                        appDefinitionResourceUID, dep);
+                return dep;
+            });
+            LOGGER.info(formatLogMessage(correlationId,
+                    "Removed app definition owner from deployment " + deployment.getMetadata().getName()));
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Failed removing app definition owner from deployment " + deployment.getMetadata().getName()), e);
+        }
     }
 
     protected void createAndApplyService(NamespacedKubernetesClient client, String namespace, String correlationId,

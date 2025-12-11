@@ -27,6 +27,7 @@ import java.util.Optional;
 
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
@@ -169,6 +170,32 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         } else {
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_MONITOR_PORT, "");
         }
+
+        // Handle data bridge port
+        boolean dataBridgeEnabled = DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec());
+        if (!dataBridgeEnabled) {
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "0");
+        } else {
+            int portNumber = DataBridgeUtil.getDataBridgePort(appDefinition.getSpec());
+            if (portNumber == appDefinition.getSpec().getPort()
+                    || (appDefinition.getSpec().getMonitor() != null
+                            && portNumber == appDefinition.getSpec().getMonitor().getPort())) {
+                // Just remove the placeholder, otherwise the port would be duplicate
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
+            } else {
+                // Replace the placeholder with the port information
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT,
+                        "- containerPort: " + portNumber + "\n" + "              name: data-bridge");
+                // Set the environment variable value
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT,
+                        String.valueOf(portNumber));
+            }
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "1");
+        }
+
         return environmentVariables;
     }
 

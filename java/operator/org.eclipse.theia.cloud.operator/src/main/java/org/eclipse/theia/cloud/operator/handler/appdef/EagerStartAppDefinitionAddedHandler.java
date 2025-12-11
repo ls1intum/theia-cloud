@@ -47,6 +47,7 @@ import org.eclipse.theia.cloud.operator.util.TheiaCloudServiceUtil;
 import com.google.inject.Inject;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -262,7 +263,8 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
         }
         for (Service service : existingServices) {
             Integer id = TheiaCloudServiceUtil.getId(correlationId, appDefinition, service);
-            if (id != null && id > instances) {
+            if (id == null) continue;
+            if (id > instances) {
                 if (!isOwnedSolelyByAppDefinition(service, appDefinitionResourceName, appDefinitionResourceUID)) {
                     if (hasAdditionalOwners(service, appDefinitionResourceName, appDefinitionResourceUID)) {
                         removeAppDefinitionOwnerReference(correlationId, service, appDefinitionResourceName,
@@ -278,6 +280,29 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                     LOGGER.error(formatLogMessage(correlationId,
                             "Failed deleting service " + service.getMetadata().getName()), e);
                     success = false;
+                }
+            } else {
+                // recreate service if it's not used by any session to apply updates
+                // otherwise, it's the SessionHandler's responsibility to update the service after
+                // the session is deleted
+                if (isOwnedSolelyByAppDefinition(service, appDefinitionResourceName, appDefinitionResourceUID)) {
+                    boolean isInternal = service.getMetadata().getName()
+                            .equals(TheiaCloudServiceUtil.getInternalServiceName(appDefinition, id));
+                    try {
+                        client.kubernetes().services().inNamespace(client.namespace()).resource(service).delete();
+                        if (isInternal) {
+                            createAndApplyInternalService(client.kubernetes(), client.namespace(), correlationId,
+                                    appDefinitionResourceName, appDefinitionResourceUID, id, appDefinition, labelsToAdd);
+                        } else {
+                            createAndApplyService(client.kubernetes(), client.namespace(), correlationId,
+                                    appDefinitionResourceName, appDefinitionResourceUID, id, appDefinition,
+                                    arguments.isUseKeycloak(), labelsToAdd);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed recreating service " + service.getMetadata().getName()), e);
+                        success = false;
+                    }
                 }
             }
         }
@@ -313,7 +338,8 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
 
             for (ConfigMap configMap : existingProxyConfigMaps) {
                 Integer id = TheiaCloudConfigMapUtil.getProxyId(correlationId, appDefinition, configMap);
-                if (id != null && id > instances) {
+                if (id == null) continue;
+                if (id > instances) {
                     if (hasAdditionalOwners(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
                         removeAppDefinitionOwnerReference(correlationId, configMap, appDefinitionResourceName,
                                 appDefinitionResourceUID);
@@ -326,11 +352,24 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                                 "Failed deleting proxy configmap " + configMap.getMetadata().getName()), e);
                         success = false;
                     }
+                } else {
+                    if (isOwnedSolelyByAppDefinition(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
+                        try {
+                            client.kubernetes().configMaps().inNamespace(client.namespace()).resource(configMap).delete();
+                            createAndApplyProxyConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                                    appDefinitionResourceName, appDefinitionResourceUID, id, appDefinition, labelsToAdd);
+                        } catch (Exception e) {
+                            LOGGER.error(formatLogMessage(correlationId,
+                                    "Failed recreating proxy configmap " + configMap.getMetadata().getName()), e);
+                            success = false;
+                        }
+                    }
                 }
             }
             for (ConfigMap configMap : existingEmailsConfigMaps) {
                 Integer id = TheiaCloudConfigMapUtil.getEmailId(correlationId, appDefinition, configMap);
-                if (id != null && id > instances) {
+                if (id == null) continue;
+                if (id > instances) {
                     if (hasAdditionalOwners(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
                         removeAppDefinitionOwnerReference(correlationId, configMap, appDefinitionResourceName,
                                 appDefinitionResourceUID);
@@ -342,6 +381,18 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                         LOGGER.error(formatLogMessage(correlationId,
                                 "Failed deleting email configmap " + configMap.getMetadata().getName()), e);
                         success = false;
+                    }
+                } else {
+                    if (isOwnedSolelyByAppDefinition(configMap, appDefinitionResourceName, appDefinitionResourceUID)) {
+                        try {
+                            client.kubernetes().configMaps().inNamespace(client.namespace()).resource(configMap).delete();
+                            createAndApplyEmailConfigMap(client.kubernetes(), client.namespace(), correlationId,
+                                    appDefinitionResourceName, appDefinitionResourceUID, id, appDefinition, labelsToAdd);
+                        } catch (Exception e) {
+                            LOGGER.error(formatLogMessage(correlationId,
+                                    "Failed recreating email configmap " + configMap.getMetadata().getName()), e);
+                            success = false;
+                        }
                     }
                 }
             }
@@ -370,15 +421,29 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                             "Failed deleting deployment " + deployment.getMetadata().getName()), e);
                     success = false;
                 }
+            } else if (id != null) {
+                if (isOwnedSolelyByAppDefinition(deployment, appDefinitionResourceName, appDefinitionResourceUID)) {
+                    try {
+                        client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(deployment)
+                                .delete();
+                        createAndApplyDeployment(client.kubernetes(), client.namespace(), correlationId,
+                                appDefinitionResourceName, appDefinitionResourceUID, id, appDefinition,
+                                arguments.isUseKeycloak(), labelsToAdd);
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed recreating deployment " + deployment.getMetadata().getName()), e);
+                        success = false;
+                    }
+                }
             }
         }
 
         return success;
     }
 
-    private boolean isOwnedSolelyByAppDefinition(Service service, String appDefinitionResourceName,
+    private boolean isOwnedSolelyByAppDefinition(HasMetadata resource, String appDefinitionResourceName,
             String appDefinitionResourceUID) {
-        List<io.fabric8.kubernetes.api.model.OwnerReference> ownerReferences = service.getMetadata().getOwnerReferences();
+        List<OwnerReference> ownerReferences = resource.getMetadata().getOwnerReferences();
         if (ownerReferences == null || ownerReferences.isEmpty()) {
             return false;
         }

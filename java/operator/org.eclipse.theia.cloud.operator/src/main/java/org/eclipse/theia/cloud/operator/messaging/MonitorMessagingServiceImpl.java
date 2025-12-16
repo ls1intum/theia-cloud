@@ -35,6 +35,9 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
+
 public class MonitorMessagingServiceImpl implements MonitorMessagingService {
 
     private static final String MONITOR_BASE_PATH = "/monitor";
@@ -47,6 +50,11 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
 
     @Inject
     private TheiaCloudOperatorArguments arguments;
+
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .addInterceptor(new SentryOkHttpInterceptor())
+            .eventListener(new SentryOkHttpEventListener())
+            .build();
 
     @Override
     public void sendMessage(Session session, String level, String message) {
@@ -72,20 +80,18 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
     }
 
     protected void postMessage(Session session, String level, String message, boolean fullscreen, String detail) {
-        OkHttpClient client = new OkHttpClient().newBuilder().build();
-
         Optional<String> postMessageURL = getURL(session);
         if (postMessageURL.isPresent()) {
             MediaType mediaType = MediaType.parse("application/json; charset=utf-8");
             String json = new JSONObject().put("message", message).put("level", level).put("fullscreen", fullscreen)
                     .put("detail", detail).toString();
 
-            RequestBody body = RequestBody.create(mediaType, json);
+            RequestBody body = RequestBody.create(json, mediaType);
             Request postRequest = new Request.Builder().url(postMessageURL.get())
                     .addHeader("Authorization", "Bearer " + session.getSpec().getSessionSecret()).method("POST", body)
                     .build();
             try {
-                client.newCall(postRequest).execute();
+                httpClient.newCall(postRequest).execute();
             } catch (IOException e) {
                 LOGGER.info("[" + session.getSpec().getName() + "] Could not send message to extension:" + e);
             }

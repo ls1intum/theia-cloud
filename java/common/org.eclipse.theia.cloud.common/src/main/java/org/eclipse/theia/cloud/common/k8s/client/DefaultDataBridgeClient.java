@@ -21,6 +21,9 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
+
 /**
  * Default implementation of {@link DataBridgeClient} using OkHttp.
  */
@@ -54,8 +57,13 @@ public class DefaultDataBridgeClient implements DataBridgeClient {
     }
 
     private static OkHttpClient createDefaultHttpClient() {
-        return new OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS).build();
+        return new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .addInterceptor(new SentryOkHttpInterceptor())
+                .eventListener(new SentryOkHttpEventListener())
+                .build();
     }
 
     @Override
@@ -121,7 +129,7 @@ public class DefaultDataBridgeClient implements DataBridgeClient {
             JSONObject environment = new JSONObject(data);
             requestBody.put("environment", environment);
 
-            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, requestBody.toString());
+            RequestBody body = RequestBody.create(requestBody.toString(), JSON_MEDIA_TYPE);
 
             // Build and execute request
             Request request = new Request.Builder().url(url).post(body).build();

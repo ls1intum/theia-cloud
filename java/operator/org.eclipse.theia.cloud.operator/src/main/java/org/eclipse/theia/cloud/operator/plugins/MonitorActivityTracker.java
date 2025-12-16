@@ -48,6 +48,8 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
+import io.sentry.Sentry;
+
 public class MonitorActivityTracker implements OperatorPlugin {
 
     private static final ScheduledExecutorService EXECUTOR = Executors.newSingleThreadScheduledExecutor();

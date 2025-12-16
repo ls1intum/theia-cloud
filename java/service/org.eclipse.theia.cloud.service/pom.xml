@@ -154,6 +154,26 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>io.sentry</groupId>
+                <artifactId>sentry-maven-plugin</artifactId>
+                <version>0.10.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <org>aet</org>
+                    <project>theia</project>
+                    <authToken>${env.SENTRY_AUTH_TOKEN}</authToken>
+                    <debugSentryCli>true</debugSentryCli>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>uploadSourceBundle</goal>
+                            <goal>validateSdkDependencyVersions</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
     <profiles>

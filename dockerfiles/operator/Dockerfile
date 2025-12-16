@@ -1,4 +1,6 @@
 FROM eclipse-temurin:21-jdk AS builder
+ARG SENTRY_AUTH_TOKEN
+ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
 RUN apt-get update && apt-get install -y maven
 WORKDIR /operator
 COPY java/common ./common
@@ -19,7 +21,7 @@ WORKDIR /log-config
 COPY java/operator/org.eclipse.theia.cloud.defaultoperator/log4j2.xml .
 WORKDIR /operator
 COPY --from=builder /operator/operator/org.eclipse.theia.cloud.defaultoperator/target/defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar .
-COPY java/operator/org.eclipse.theia.cloud.operator/sentry.properties .
+COPY java/operator/org.eclipse.theia.cloud.defaultoperator/sentry.properties .
 RUN curl -L -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
 
 ENV SENTRY_PROPERTIES_FILE=sentry.properties

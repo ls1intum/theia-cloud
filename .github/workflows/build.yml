@@ -7,6 +7,20 @@ on:
       - main
 
 jobs:
+  prepare-sentry-build-args:
+    runs-on: ubuntu-latest
+    outputs:
+      sentry_build_args: ${{ steps.out.outputs.sentry_build_args }}
+    steps:
+      - id: out
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          echo "sentry_build_args<<EOF" >> "$GITHUB_OUTPUT"
+          echo "SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
   build-and-push-base:
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
@@ -15,20 +29,20 @@ jobs:
       docker-context: .
     secrets: inherit
   build-and-push-operator:
+    needs: prepare-sentry-build-args
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
       docker-file: dockerfiles/operator/Dockerfile
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
-      build-args: |
-        SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+      build-args: ${{ needs.prepare-sentry-build-args.outputs.sentry_build_args }}
     secrets: inherit
   build-and-push-service:
+    needs: prepare-sentry-build-args
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
       docker-file: dockerfiles/service/Dockerfile
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
-      build-args: |
-        SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+      build-args: ${{ needs.prepare-sentry-build-args.outputs.sentry_build_args }}
     secrets: inherit

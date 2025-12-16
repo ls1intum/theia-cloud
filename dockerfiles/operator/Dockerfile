@@ -1,11 +1,12 @@
+# syntax=docker/dockerfile:1.4
 FROM eclipse-temurin:21-jdk AS builder
-ARG SENTRY_AUTH_TOKEN
-ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
 RUN apt-get update && apt-get install -y maven
 WORKDIR /operator
 COPY java/common ./common
 COPY java/operator ./operator
-RUN cd /operator/common/maven-conf && \
+RUN --mount=type=secret,id=SENTRY_AUTH_TOKEN,required=true \
+    export SENTRY_AUTH_TOKEN="$(cat /run/secrets/SENTRY_AUTH_TOKEN)" && \
+    cd /operator/common/maven-conf && \
     mvn clean install --no-transfer-progress && \
     cd /operator/common/org.eclipse.theia.cloud.common && \
     mvn clean install --no-transfer-progress && \

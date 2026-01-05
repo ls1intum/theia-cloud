@@ -18,7 +18,7 @@ WORKDIR /service
 COPY --from=builder /service/service/org.eclipse.theia.cloud.service/target/service-1.2.0-SNAPSHOT-runner.jar .
 COPY java/service/org.eclipse.theia.cloud.service/sentry.properties .
 RUN curl -fsSL -o sentry-agent.zip https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.zip && \
-    unzip sentry-agent.zip && \
+    unzip -j sentry-agent.zip -d . && \
     rm sentry-agent.zip
 
 ENV SERVICE_PORT 8081

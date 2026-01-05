@@ -92,7 +92,7 @@
                     <org>aet</org>
                     <project>theia</project>
                     <authToken>${env.SENTRY_AUTH_TOKEN}</authToken>
-                    <url>https://sentry.aet.cit.tum.de/</url>
+                    <url>https://sentry.aet.cit.tum.de</url>
                     <debugSentryCli>true</debugSentryCli>
                 </configuration>
                 <executions>

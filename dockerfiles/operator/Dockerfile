@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.4
 FROM eclipse-temurin:21-jdk AS builder
 RUN apt-get update && apt-get install -y maven
 WORKDIR /operator
@@ -23,7 +22,7 @@ COPY java/operator/org.eclipse.theia.cloud.defaultoperator/log4j2.xml .
 WORKDIR /operator
 COPY --from=builder /operator/operator/org.eclipse.theia.cloud.defaultoperator/target/defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar .
 COPY java/operator/org.eclipse.theia.cloud.defaultoperator/sentry.properties .
-RUN curl -L -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
+RUN curl -fsSL -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
 
 ENV SENTRY_PROPERTIES_FILE=sentry.properties
 # to get more debug information from the kubernetes client itself, add -Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG below

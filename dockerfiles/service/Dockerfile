@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.4
 FROM eclipse-temurin:21-jdk AS builder
 RUN apt-get update && apt-get install -y maven
 WORKDIR /service
@@ -18,7 +17,7 @@ RUN apk add --no-cache curl
 WORKDIR /service
 COPY --from=builder /service/service/org.eclipse.theia.cloud.service/target/service-1.2.0-SNAPSHOT-runner.jar .
 COPY java/service/org.eclipse.theia.cloud.service/sentry.properties .
-RUN curl -L -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
+RUN curl -fsSL -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
 
 ENV SERVICE_PORT 8081
 

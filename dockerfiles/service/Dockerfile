@@ -13,11 +13,13 @@ RUN --mount=type=secret,id=SENTRY_AUTH_TOKEN,required=true \
     mvn clean package -Dmaven.test.skip=true -Dquarkus.package.type=uber-jar --no-transfer-progress
 
 FROM eclipse-temurin:21-jre-alpine
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl unzip
 WORKDIR /service
 COPY --from=builder /service/service/org.eclipse.theia.cloud.service/target/service-1.2.0-SNAPSHOT-runner.jar .
 COPY java/service/org.eclipse.theia.cloud.service/sentry.properties .
-RUN curl -fsSL -o sentry-opentelemetry-agent-8.29.0.jar https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.jar
+RUN curl -fsSL -o sentry-agent.zip https://github.com/getsentry/sentry-java/releases/download/8.29.0/sentry-opentelemetry-agent-8.29.0.zip && \
+    unzip sentry-agent.zip && \
+    rm sentry-agent.zip
 
 ENV SERVICE_PORT 8081
 

@@ -1,12 +1,3 @@
-/**
- * Copyright (C) 2025.
- *
- * This program and the accompanying materials are made available under the
- * terms of the Eclipse Public License v. 2.0 which is available at
- * http://www.eclipse.org/legal/epl-2.0.
- *
- * SPDX-License-Identifier: EPL-2.0
- */
 package org.eclipse.theia.cloud.operator.handler.session;
 
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
@@ -23,13 +14,12 @@ import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import com.google.inject.Inject;
 
 /**
- * Tries to handle a session with {@link EagerSessionHandler} first. If there is no prewarmed capacity left, falls back
- * to {@link LazySessionHandler}.
+ * Tries to handle a session with {@link EagerSessionHandler} first.
+ * If there is no prewarmed capacity left, falls back to {@link LazySessionHandler}.
  */
 public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
 
-    public static final String SESSION_START_STRATEGY_ANNOTATION = "theia-cloud.io/session-start-strategy";
-    public static final String SESSION_START_STRATEGY_EAGER = "eager";
+    /** Value indicating session was started lazily after eager capacity was exhausted. */
     public static final String SESSION_START_STRATEGY_LAZY_FALLBACK = "lazy-fallback";
 
     private static final Logger LOGGER = LogManager.getLogger(EagerWithLazyFallbackSessionHandler.class);
@@ -45,7 +35,9 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
+        // Try eager start first
         EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId);
+
         if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.HANDLED) {
             return true;
         }
@@ -53,6 +45,7 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
             return false;
         }
 
+        // No capacity - fall back to lazy start
         LOGGER.info(formatLogMessage(correlationId,
                 "No prewarmed capacity left. Falling back to lazy session handling."));
 
@@ -67,12 +60,14 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
     public boolean sessionDeleted(Session session, String correlationId) {
         String strategy = Optional.ofNullable(session.getMetadata())
                 .map(m -> m.getAnnotations())
-                .map(a -> a.get(SESSION_START_STRATEGY_ANNOTATION))
+                .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION))
                 .orElse(null);
 
-        if (SESSION_START_STRATEGY_EAGER.equals(strategy)) {
+        // If started with eager, use eager cleanup (releases back to pool)
+        if (EagerSessionHandler.SESSION_START_STRATEGY_EAGER.equals(strategy)) {
             return eager.sessionDeleted(session, correlationId);
         }
+        // Otherwise use lazy cleanup (just ingress cleanup, K8s GC handles rest)
         return lazy.sessionDeleted(session, correlationId);
     }
 
@@ -84,8 +79,7 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
                 annotations = new HashMap<>();
                 s.getMetadata().setAnnotations(annotations);
             }
-            annotations.put(SESSION_START_STRATEGY_ANNOTATION, strategy);
+            annotations.put(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION, strategy);
         });
     }
 }
-

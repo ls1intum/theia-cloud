@@ -217,24 +217,43 @@ public class PrewarmedResourcePool {
 
         boolean success = true;
 
-        // Reconcile services (both external and internal - they share the same instance ID)
+        // Reconcile services - must be done separately because the reconciler expects 1 resource per ID
         List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
                 ownerUID);
+        List<Service> externalServices = existingServices.stream()
+                .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+        List<Service> internalServices = existingServices.stream()
+                .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
         Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
                 targetInstances, existingServices);
 
+        // Reconcile external services
         success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder()
-                .correlationId(correlationId).existingResources(existingServices).missingIds(missingServiceIds)
+                .correlationId(correlationId).existingResources(externalServices).missingIds(missingServiceIds)
                 .targetCount(targetInstances).owner(owner)
                 .resourceAccessor(s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
                 .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s)).resourceTypeName("service")
                 .createResource(instance -> {
                     resourceFactory.createServiceForEagerInstance(appDef, instance, labels, correlationId);
-                    resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels, correlationId);
                 }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
                     Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
                     if (id != null) {
                         resourceFactory.createServiceForEagerInstance(appDef, id, labels, correlationId);
+                    }
+                }).build()).isSuccess();
+
+        // Reconcile internal services
+        success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder()
+                .correlationId(correlationId).existingResources(internalServices).missingIds(missingServiceIds)
+                .targetCount(targetInstances).owner(owner)
+                .resourceAccessor(s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
+                .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s))
+                .resourceTypeName("internal service").createResource(instance -> {
+                    resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels, correlationId);
+                }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
+                    Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
+                    if (id != null) {
+                        resourceFactory.createInternalServiceForEagerInstance(appDef, id, labels, correlationId);
                     }
                 }).build()).isSuccess();
 

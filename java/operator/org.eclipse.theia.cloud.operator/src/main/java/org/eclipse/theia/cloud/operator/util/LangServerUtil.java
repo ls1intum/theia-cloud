@@ -29,7 +29,7 @@ public class LangServerUtil {
         replacements.put("placeholder-servicename", "ls-" + sessionResourceName);
         replacements.put("placeholder-app", "ls-" + sessionResourceName);
         replacements.put("placeholder-namespace", namespace);
-        replacements.put("placeholder", sessionResourceName);
+        replacements.put("placeholder-session", sessionResourceName);
         LangServerDetails lsDetails = getLangServerDetails(appDefinition.getSpec().getOptions().get("langserver-image"), appDefinition);
         replacements.put("placeholder-java-port", lsDetails.getPort());
         replacements.put("placeholder-rust-port", lsDetails.getPort());

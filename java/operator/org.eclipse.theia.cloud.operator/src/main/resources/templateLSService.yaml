@@ -8,8 +8,8 @@ metadata:
   ownerReferences:
     - apiVersion: theia.cloud/v1beta9
       kind: Session
-      name: placeholder
-      uid: placeholder
+      name: placeholder-session
+      uid: placeholder-session
 spec:
   ports:
     - name: java-ls

@@ -30,9 +30,12 @@ public class LangServerUtil {
         replacements.put("placeholder-app", "ls-" + sessionResourceName);
         replacements.put("placeholder-namespace", namespace);
         replacements.put("placeholder-session", sessionResourceName);
-        LangServerDetails lsDetails = getLangServerDetails(appDefinition.getSpec().getOptions().get("langserver-image"), appDefinition);
-        replacements.put("placeholder-java-port", lsDetails.getPort());
-        replacements.put("placeholder-rust-port", lsDetails.getPort());
+        
+        String javaPort = appDefinition.getSpec().getOptions().getOrDefault("langserver-java-port", "5556");
+        String rustPort = appDefinition.getSpec().getOptions().getOrDefault("langserver-rust-port", "5555");
+        
+        replacements.put("placeholder-java-port", javaPort);
+        replacements.put("placeholder-rust-port", rustPort);
 
         String serviceYaml;
         try {
@@ -58,9 +61,12 @@ public class LangServerUtil {
         replacements.put("placeholder-app", "ls-" + sessionResourceName);
         replacements.put("placeholder-namespace", namespace);
         replacements.put("placeholder-image", lsImage);
-        LangServerDetails lsDetails = getLangServerDetails(lsImage, appDefinition);
-        replacements.put("placeholder-java-port", lsDetails.getPort());
-        replacements.put("placeholder-rust-port", lsDetails.getPort());
+        
+        String javaPort = appDefinition.getSpec().getOptions().getOrDefault("langserver-java-port", "5556");
+        String rustPort = appDefinition.getSpec().getOptions().getOrDefault("langserver-rust-port", "5555");
+        
+        replacements.put("placeholder-java-port", javaPort);
+        replacements.put("placeholder-rust-port", rustPort);
 
 
         String deploymentYaml;

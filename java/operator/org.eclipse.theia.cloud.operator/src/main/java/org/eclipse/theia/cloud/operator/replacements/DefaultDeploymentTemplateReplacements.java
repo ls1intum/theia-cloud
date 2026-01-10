@@ -27,6 +27,7 @@ import java.util.Optional;
 
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
@@ -49,6 +50,8 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
     public static final String PLACEHOLDER_MEMORY_REQUESTS = "placeholder-memory-requests";
     public static final String PLACEHOLDER_UID = "placeholder-uid";
 
+    public static final String PLACEHOLDER_ENV_SERVICE_AUTH_TOKEN = "placeholder-env-service-auth-token";
+    /** @deprecated Use PLACEHOLDER_ENV_SERVICE_AUTH_TOKEN instead */
     public static final String PLACEHOLDER_ENV_APP_ID = "placeholder-env-app-id";
     public static final String PLACEHOLDER_ENV_SERVICE_URL = "placeholder-env-service-url";
     public static final String PLACEHOLDER_ENV_SESSION_UID = "placeholder-env-session-uid";
@@ -126,7 +129,9 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
 
     protected Map<String, String> getEnvironmentVariables(AppDefinition appDefinition, Optional<Session> session) {
         Map<String, String> environmentVariables = new LinkedHashMap<String, String>();
-        environmentVariables.put(PLACEHOLDER_ENV_APP_ID, arguments.getAppId());
+        // Set both new and old placeholders for backwards compatibility
+        environmentVariables.put(PLACEHOLDER_ENV_SERVICE_AUTH_TOKEN, arguments.getServiceAuthToken());
+        environmentVariables.put(PLACEHOLDER_ENV_APP_ID, arguments.getServiceAuthToken());
         environmentVariables.put(PLACEHOLDER_ENV_SERVICE_URL, arguments.getServiceUrl());
         environmentVariables.put(PLACEHOLDER_ENV_SESSION_UID, session.map(s -> s.getMetadata().getUid()).orElse(""));
         environmentVariables.put(PLACEHOLDER_ENV_SESSION_NAME, session.map(s -> s.getSpec().getName()).orElse(""));
@@ -165,6 +170,32 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         } else {
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_MONITOR_PORT, "");
         }
+
+        // Handle data bridge port
+        boolean dataBridgeEnabled = DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec());
+        if (!dataBridgeEnabled) {
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "0");
+        } else {
+            int portNumber = DataBridgeUtil.getDataBridgePort(appDefinition.getSpec());
+            if (portNumber == appDefinition.getSpec().getPort()
+                    || (appDefinition.getSpec().getMonitor() != null
+                            && portNumber == appDefinition.getSpec().getMonitor().getPort())) {
+                // Just remove the placeholder, otherwise the port would be duplicate
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
+            } else {
+                // Replace the placeholder with the port information
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT,
+                        "- containerPort: " + portNumber + "\n" + "              name: data-bridge");
+                // Set the environment variable value
+                environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT,
+                        String.valueOf(portNumber));
+            }
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "1");
+        }
+
         return environmentVariables;
     }
 

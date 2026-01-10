@@ -13,7 +13,8 @@ import {
   WorkspaceListRequest,
   PingRequest,
   LaunchRequest,
-  SessionPerformanceRequest
+  SessionPerformanceRequest,
+  SessionSetConfigValueRequest
 } from '@eclipse-theiacloud/common';
 
 const KEYCLOAK_CONFIG: KeycloakConfig = {
@@ -25,7 +26,7 @@ const KEYCLOAK_CONFIG: KeycloakConfig = {
 const SERVICE_URL = 'https://service.localdemo.io';
 
 const APP_DEFINITION = 'theia-cloud-demo';
-const APP_ID = 'asdfghjkl';
+const SERVICE_AUTH_TOKEN = 'asdfghjkl';
 
 function App() {
   const [token, setToken] = useState<string>();
@@ -33,6 +34,8 @@ function App() {
   const [email, setEmail] = useState<string>();
   const [user, setUser] = useState('');
   const [resourceName, setResourceName] = useState('');
+  const [configKey, setConfigKey] = useState('');
+  const [configValue, setConfigValue] = useState('');
 
   useEffect(() => {
     const keycloak = Keycloak(KEYCLOAK_CONFIG);
@@ -88,14 +91,14 @@ function App() {
   // Root requests
   const ping = (_user: string, accessToken?: string) => {
     const request: PingRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       serviceUrl: SERVICE_URL
     };
     return TheiaCloud.ping(request, generateRequestOptions(accessToken));
   };
   const launch = (user: string, accessToken?: string) => {
     const request: LaunchRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       appDefinition: APP_DEFINITION,
       user,
       serviceUrl: SERVICE_URL,
@@ -107,7 +110,7 @@ function App() {
   // Workspace requests
   const listWorkspaces = (user: string, accessToken?: string) => {
     const request: WorkspaceListRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       user,
       serviceUrl: SERVICE_URL
     };
@@ -115,7 +118,7 @@ function App() {
   };
   const createWorkspace = (user: string, accessToken?: string) => {
     const request: WorkspaceCreationRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       appDefinition: APP_DEFINITION,
       user,
       serviceUrl: SERVICE_URL
@@ -124,7 +127,7 @@ function App() {
   };
   const deleteWorkspace = (user: string, accessToken?: string) => {
     const request: WorkspaceDeletionRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       user,
       workspaceName: resourceName,
       serviceUrl: SERVICE_URL
@@ -135,7 +138,7 @@ function App() {
   // Session requests
   const listSessions = (user: string, accessToken?: string) => {
     const request: SessionListRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       user,
       serviceUrl: SERVICE_URL
     };
@@ -143,7 +146,7 @@ function App() {
   };
   const startSession = (user: string, accessToken?: string) => {
     const request: SessionStartRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       appDefinition: APP_DEFINITION,
       user,
       workspaceName: resourceName ? resourceName : undefined,
@@ -153,7 +156,7 @@ function App() {
   };
   const stopSession = (user: string, accessToken?: string) => {
     const request: SessionStopRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       user,
       sessionName: resourceName,
       serviceUrl: SERVICE_URL
@@ -162,17 +165,26 @@ function App() {
   };
   const reportSessionPerformance = (user: string, accessToken?: string) => {
     const request: SessionPerformanceRequest = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       sessionName: resourceName,
       serviceUrl: SERVICE_URL
     };
     return TheiaCloud.Session.getSessionPerformance(request, generateRequestOptions(accessToken));
   };
+  const setSessionConfigValue = (user: string, accessToken?: string) => {
+    const request: SessionSetConfigValueRequest = {
+      appId: SERVICE_AUTH_TOKEN,
+      key: configKey,
+      value: configValue,
+      serviceUrl: SERVICE_URL
+    };
+    return TheiaCloud.Session.setConfigValue(resourceName, request, generateRequestOptions(accessToken));
+  };
 
   // App definition requests
   const listAppDefinitions = (user: string, accessToken?: string) => {
     const request = {
-      appId: APP_ID,
+      appId: SERVICE_AUTH_TOKEN,
       user,
       serviceUrl: SERVICE_URL
     };
@@ -188,7 +200,7 @@ function App() {
       <p>Open your browser's dev tools (F12) to see outgoing requests. Results are logged to the console as well.</p>
       {email ? <p>Logged in as: {email}</p> : <button onClick={login}>Login via Keycloak</button>}
       {logoutUrl && <a href={logoutUrl}>Logout</a>}
-      <p>AppId: {APP_ID}</p>
+      <p>Service Auth Token: {SERVICE_AUTH_TOKEN}</p>
       <p>Service URL: {SERVICE_URL}</p>
       <p>
         <span>User:</span>
@@ -208,6 +220,18 @@ function App() {
         <button onClick={() => executeRequest(stopSession)}>Stop Session</button>
         <button onClick={() => executeRequest(reportSessionPerformance)}>Report Session Performance</button>
       </p>
+      <div>
+        <p>Session Key Value Config:</p>
+        <p>
+          <span>Key:</span>
+          <input type='text' value={configKey} onChange={ev => setConfigKey(ev.target.value)} />
+        </p>
+        <p>
+          <span>Value:</span>
+          <input type='text' value={configValue} onChange={ev => setConfigValue(ev.target.value)} />
+        </p>
+        <button onClick={() => executeRequest(setSessionConfigValue)}>Set Config Value</button>
+      </div>
       <p>
         <button onClick={() => executeRequest(listWorkspaces)}>List Workspaces</button>
         <button onClick={() => executeRequest(createWorkspace)}>Create Workspace</button>

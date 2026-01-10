@@ -279,7 +279,7 @@ public class EagerSessionHandler implements SessionHandler {
         if (appDefinition.get().getSpec().getOptions() != null
                 && appDefinition.get().getSpec().getOptions().containsKey("langserver-image")) {
             String lsImage = appDefinition.get().getSpec().getOptions().get("langserver-image");
-            LOGGER.info(formatLogMessage(correlationId, "Found langserver-image option: " + lsImage));
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Found langserver-image option: " + lsImage));
 
             LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
                     sessionResourceUID, appDefinition.get());
@@ -292,9 +292,9 @@ public class EagerSessionHandler implements SessionHandler {
                     LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition.get());
                     return deployment;
                 });
-                LOGGER.info(formatLogMessage(correlationId, "Updated Theia deployment with LS env vars"));
+                LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars"));
             } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "Error while updating Theia deployment with LS env vars"), e);
+                LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while updating Theia deployment with LS env vars"), e);
                 return false;
             }
         }

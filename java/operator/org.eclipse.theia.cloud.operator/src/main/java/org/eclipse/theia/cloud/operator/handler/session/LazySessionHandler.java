@@ -301,7 +301,7 @@ public class LazySessionHandler implements SessionHandler {
         if (appDefinition.getSpec().getOptions() != null
                 && appDefinition.getSpec().getOptions().containsKey("langserver-image")) {
             String lsImage = appDefinition.getSpec().getOptions().get("langserver-image");
-            LOGGER.info(formatLogMessage(correlationId, "Found langserver-image option: " + lsImage));
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Found langserver-image option: " + lsImage));
 
             LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
                     sessionResourceUID, appDefinition);
@@ -314,9 +314,9 @@ public class LazySessionHandler implements SessionHandler {
                     LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition);
                     return deployment;
                 });
-                LOGGER.info(formatLogMessage(correlationId, "Updated Theia deployment with LS env vars"));
+                LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars"));
             } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "Error while updating Theia deployment with LS env vars"), e);
+                LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while updating Theia deployment with LS env vars"), e);
                 client.sessions().updateStatus(correlationId, session, s -> {
                     s.setOperatorStatus(OperatorStatus.ERROR);
                     s.setOperatorMessage("Failed to update Theia deployment with LS env vars.");
@@ -325,7 +325,7 @@ public class LazySessionHandler implements SessionHandler {
             }
         }
         else {
-            LOGGER.info(formatLogMessage(correlationId, "No External Language Server Support configured for app definition " + appDefinitionID));
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] No External Language Server Support configured for app definition " + appDefinitionID));
         }
 
         client.sessions().updateStatus(correlationId, session, s -> {

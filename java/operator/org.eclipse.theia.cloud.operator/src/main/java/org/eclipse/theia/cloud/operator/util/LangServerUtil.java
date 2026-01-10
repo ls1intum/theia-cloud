@@ -24,7 +24,7 @@ public class LangServerUtil {
 
     public static void createAndApplyLSService(NamespacedKubernetesClient client, String namespace, String correlationId,
             String sessionResourceName, String sessionResourceUID, AppDefinition appDefinition) {
-        LOGGER.info(formatLogMessage(correlationId, "Creating LS service for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Creating LS service for session " + sessionResourceName));
         Map<String, String> replacements = new HashMap<>();
         replacements.put("placeholder-servicename", "ls-" + sessionResourceName);
         replacements.put("placeholder-app", "ls-" + sessionResourceName);
@@ -42,20 +42,20 @@ public class LangServerUtil {
             serviceYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(AddedHandlerUtil.TEMPLATE_LS_SERVICE_YAML,
                     replacements, correlationId);
         } catch (IOException | URISyntaxException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Error while adjusting LS service template"), e);
+            LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while adjusting LS service template"), e);
             return;
         }
 
         K8sUtil.loadAndCreateServiceWithOwnerReference(client, namespace, correlationId, serviceYaml,
                 "theia.cloud/v1beta9", "Session", sessionResourceName, sessionResourceUID, 0,
                 Collections.emptyMap());
-        LOGGER.info(formatLogMessage(correlationId, "Successfully created LS service for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Successfully created LS service for session " + sessionResourceName));
     }
 
     public static void createAndApplyLSDeployment(NamespacedKubernetesClient client, String namespace, String correlationId,
             String sessionResourceName, String sessionResourceUID, AppDefinition appDefinition,
             String lsImage) {
-        LOGGER.info(formatLogMessage(correlationId, "Creating LS deployment for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Creating LS deployment for session " + sessionResourceName));
         Map<String, String> replacements = new HashMap<>();
         replacements.put("placeholder-depname", "ls-" + sessionResourceName);
         replacements.put("placeholder-app", "ls-" + sessionResourceName);
@@ -74,7 +74,7 @@ public class LangServerUtil {
             deploymentYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
                     AddedHandlerUtil.TEMPLATE_LS_DEPLOYMENT_YAML, replacements, correlationId);
         } catch (IOException | URISyntaxException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Error while adjusting LS deployment template"), e);
+            LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while adjusting LS deployment template"), e);
             return;
         }
 
@@ -83,11 +83,11 @@ public class LangServerUtil {
                 Collections.emptyMap(), deployment -> {
                     // No extra processing needed for now
                 });
-        LOGGER.info(formatLogMessage(correlationId, "Successfully created LS deployment for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Successfully created LS deployment for session " + sessionResourceName));
     }
 
     public static void updateTheiaDeploymentWithLangServerEnvVars(io.fabric8.kubernetes.api.model.apps.Deployment deployment, String sessionResourceName, String lsImage, AppDefinition appDefinition) {
-        LOGGER.info(formatLogMessage("N/A", "Updating Theia deployment with LS env vars for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage("N/A", "[LSSERVICE] Updating Theia deployment with LS env vars for session " + sessionResourceName));
         String lsServiceName = "ls-" + sessionResourceName;
         String lsHost = lsServiceName;
         LangServerDetails lsDetails = getLangServerDetails(lsImage, appDefinition);
@@ -101,18 +101,18 @@ public class LangServerUtil {
         envVars.add(new EnvVarBuilder().withName(lsDetails.getEnvHostKey()).withValue(lsHost).build());
         envVars.add(
                 new EnvVarBuilder().withName(lsDetails.getEnvPortKey()).withValue(lsDetails.getPort()).build());
-        LOGGER.info(formatLogMessage("N/A", "Successfully updated Theia deployment with LS env vars for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage("N/A", "[LSSERVICE] Successfully updated Theia deployment with LS env vars for session " + sessionResourceName));
     }
 
     public static void deleteLangServerResources(NamespacedKubernetesClient client, String sessionResourceName, String correlationId) {
-        LOGGER.info(formatLogMessage(correlationId, "Deleting LS resources for session " + sessionResourceName));
+        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Deleting LS resources for session " + sessionResourceName));
         String lsResourceName = "ls-" + sessionResourceName;
         try {
             client.services().withName(lsResourceName).delete();
             client.apps().deployments().withName(lsResourceName).delete();
-            LOGGER.info(formatLogMessage(correlationId, "Deleted LS resources: " + lsResourceName));
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Deleted LS resources: " + lsResourceName));
         } catch (io.fabric8.kubernetes.client.KubernetesClientException e) {
-            LOGGER.warn(formatLogMessage(correlationId, "Error while deleting LS resources (might be already gone)"), e);
+            LOGGER.warn(formatLogMessage(correlationId, "[LSSERVICE] Error while deleting LS resources (might be already gone)"), e);
         }
     }
 

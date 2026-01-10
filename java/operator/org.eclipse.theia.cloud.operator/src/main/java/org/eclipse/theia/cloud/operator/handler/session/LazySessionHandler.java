@@ -311,6 +311,9 @@ public class LazySessionHandler implements SessionHandler {
                 return false;
             }
         }
+        else {
+            LOGGER.info(formatLogMessage(correlationId, "No External Language Server Support configured for app definition " + appDefinitionID));
+        }
 
         client.sessions().updateStatus(correlationId, session, s -> {
             s.setOperatorStatus(OperatorStatus.HANDLED);

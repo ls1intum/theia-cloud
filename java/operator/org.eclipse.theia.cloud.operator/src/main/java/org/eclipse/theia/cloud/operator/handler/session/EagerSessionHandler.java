@@ -34,7 +34,6 @@ import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.PoolInstance;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationOutcome;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationResult;
-import org.eclipse.theia.cloud.operator.util.K8sUtil;
 
 import com.google.inject.Inject;
 
@@ -51,6 +50,7 @@ public class EagerSessionHandler implements SessionHandler {
 
     public static final String SESSION_START_STRATEGY_ANNOTATION = "theia-cloud.io/session-start-strategy";
     public static final String SESSION_START_STRATEGY_EAGER = "eager";
+    public static final String SESSION_INSTANCE_ID_ANNOTATION = "theia-cloud.io/instance-id";
 
     /**
      * Outcome of trying to handle a session with eager start.
@@ -110,8 +110,8 @@ public class EagerSessionHandler implements SessionHandler {
 
         PoolInstance instance = reservation.getInstance().get();
 
-        // Annotate session with start strategy
-        annotateSessionStrategy(session, correlationId, SESSION_START_STRATEGY_EAGER);
+        // Annotate session with start strategy and instance ID
+        annotateSession(session, correlationId, instance.getInstanceId());
 
         // Complete session setup (labels, deployment ownership, email config)
         if (!pool.completeSessionSetup(session, appDef, instance, correlationId)) {
@@ -162,10 +162,11 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
-        // Get instance ID from session's service
-        Integer instanceId = getSessionInstanceId(session, appDef, correlationId);
+        // Get instance ID from session annotation
+        Integer instanceId = getInstanceIdFromAnnotation(session);
         if (instanceId == null) {
-            LOGGER.error(formatLogMessage(correlationId, "Cannot determine instance ID for session"));
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Session missing instance-id annotation. Cannot determine which instance to release."));
             return false;
         }
 
@@ -186,7 +187,7 @@ public class EagerSessionHandler implements SessionHandler {
         return success;
     }
 
-    private void annotateSessionStrategy(Session session, String correlationId, String strategy) {
+    private void annotateSession(Session session, String correlationId, int instanceId) {
         String name = session.getMetadata().getName();
         client.sessions().edit(correlationId, name, s -> {
             Map<String, String> annotations = s.getMetadata().getAnnotations();
@@ -194,36 +195,24 @@ public class EagerSessionHandler implements SessionHandler {
                 annotations = new HashMap<>();
                 s.getMetadata().setAnnotations(annotations);
             }
-            annotations.put(SESSION_START_STRATEGY_ANNOTATION, strategy);
+            annotations.put(SESSION_START_STRATEGY_ANNOTATION, SESSION_START_STRATEGY_EAGER);
+            annotations.put(SESSION_INSTANCE_ID_ANNOTATION, String.valueOf(instanceId));
         });
     }
 
-    private Integer getSessionInstanceId(Session session, AppDefinition appDef, String correlationId) {
-        // Find the service owned by this session
-        var services = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
-                appDef.getMetadata().getName(), appDef.getMetadata().getUid());
-
-        for (var service : services) {
-            if (service.getMetadata().getName().endsWith("-int")) {
-                continue; // Skip internal services
-            }
-            // Check if session owns this service
-            var owners = service.getMetadata().getOwnerReferences();
-            boolean ownedBySession = owners != null
-                    && owners.stream().anyMatch(or -> session.getMetadata().getUid().equals(or.getUid()));
-            if (ownedBySession) {
-                String name = service.getMetadata().getName();
-                // Extract instance number from service name
-                String[] parts = name.split("-");
-                if (parts.length > 0) {
-                    try {
-                        return Integer.parseInt(parts[parts.length - 1]);
-                    } catch (NumberFormatException e) {
-                        // Continue to next service
-                    }
-                }
-            }
+    private Integer getInstanceIdFromAnnotation(Session session) {
+        Map<String, String> annotations = session.getMetadata().getAnnotations();
+        if (annotations == null) {
+            return null;
         }
-        return null;
+        String idStr = annotations.get(SESSION_INSTANCE_ID_ANNOTATION);
+        if (idStr == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(idStr);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

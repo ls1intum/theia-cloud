@@ -35,6 +35,7 @@ import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
@@ -52,6 +53,7 @@ public class PrewarmedResourcePool {
     private static final Logger LOGGER = LogManager.getLogger(PrewarmedResourcePool.class);
 
     public static final String EAGER_START_REFRESH_ANNOTATION = "theia-cloud.io/eager-start-refresh";
+    public static final String APPDEFINITION_GENERATION_LABEL = "theia-cloud.io/appdefinition-generation";
 
     @Inject
     private TheiaCloudClient client;
@@ -329,6 +331,152 @@ public class PrewarmedResourcePool {
                 }).build()).isSuccess();
 
         return success;
+    }
+
+    /**
+     * Reconciles a single instance after session release. - If instanceId > minInstances → delete all resources for
+     * this instance - If resource generation != current AppDefinition generation → recreate - Otherwise → do nothing
+     */
+    public void reconcileInstance(AppDefinition appDef, int instanceId, String correlationId) {
+        int minInstances = appDef.getSpec().getMinInstances();
+        long currentGeneration = appDef.getMetadata().getGeneration();
+
+        String ownerName = appDef.getMetadata().getName();
+        String ownerUID = appDef.getMetadata().getUid();
+
+        LOGGER.info(formatLogMessage(correlationId, "Reconciling instance " + instanceId + " (minInstances="
+                + minInstances + ", generation=" + currentGeneration + ")"));
+
+        // Find resources for this instance
+        List<Service> allServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
+                ownerUID);
+        List<Deployment> allDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
+                ownerName, ownerUID);
+        List<ConfigMap> allConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                ownerName, ownerUID);
+
+        // Filter to just this instance (includes both external and internal services)
+        List<Service> instanceServices = allServices.stream().filter(s -> instanceId == parseInstanceIdOrDefault(s, -1))
+                .collect(Collectors.toList());
+        List<Deployment> instanceDeployments = allDeployments.stream()
+                .filter(d -> instanceId == parseDeploymentInstanceIdOrDefault(appDef, d, -1))
+                .collect(Collectors.toList());
+        List<ConfigMap> instanceConfigMaps = allConfigMaps.stream()
+                .filter(cm -> instanceId == parseConfigMapInstanceIdOrDefault(appDef, cm, -1))
+                .collect(Collectors.toList());
+
+        if (instanceId > minInstances) {
+            // Instance is outside pool size - delete everything
+            LOGGER.info(formatLogMessage(correlationId,
+                    "Instance " + instanceId + " exceeds minInstances (" + minInstances + "), deleting"));
+            deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+            return;
+        }
+
+        // Check if any resource is outdated (generation mismatch)
+        boolean outdated = isOutdated(instanceServices, currentGeneration)
+                || isOutdated(instanceDeployments, currentGeneration)
+                || isOutdated(instanceConfigMaps, currentGeneration);
+
+        if (outdated) {
+            LOGGER.info(
+                    formatLogMessage(correlationId, "Instance " + instanceId + " has outdated resources, recreating"));
+            deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+            createInstanceResources(appDef, instanceId, correlationId);
+            return;
+        }
+
+        LOGGER.info(formatLogMessage(correlationId, "Instance " + instanceId + " is up-to-date, no action needed"));
+    }
+
+    private boolean isOutdated(List<? extends HasMetadata> resources, long currentGeneration) {
+        for (var resource : resources) {
+            Map<String, String> labels = resource.getMetadata().getLabels();
+            if (labels == null) {
+                return true; // No labels means outdated
+            }
+            String genLabel = labels.get(APPDEFINITION_GENERATION_LABEL);
+            if (genLabel == null) {
+                return true; // No generation label means outdated
+            }
+            try {
+                long resourceGen = Long.parseLong(genLabel);
+                if (resourceGen != currentGeneration) {
+                    return true;
+                }
+            } catch (NumberFormatException e) {
+                return true; // Invalid generation means outdated
+            }
+        }
+        return false;
+    }
+
+    private void deleteInstanceResources(List<Service> services, List<Deployment> deployments,
+            List<ConfigMap> configMaps, String correlationId) {
+        for (Service s : services) {
+            try {
+                client.kubernetes().services().inNamespace(client.namespace()).resource(s).delete();
+                LOGGER.trace(formatLogMessage(correlationId, "Deleted service " + s.getMetadata().getName()));
+            } catch (KubernetesClientException e) {
+                LOGGER.warn(formatLogMessage(correlationId, "Failed to delete service " + s.getMetadata().getName()),
+                        e);
+            }
+        }
+        for (Deployment d : deployments) {
+            try {
+                client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d).delete();
+                LOGGER.trace(formatLogMessage(correlationId, "Deleted deployment " + d.getMetadata().getName()));
+            } catch (KubernetesClientException e) {
+                LOGGER.warn(formatLogMessage(correlationId, "Failed to delete deployment " + d.getMetadata().getName()),
+                        e);
+            }
+        }
+        for (ConfigMap cm : configMaps) {
+            try {
+                client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm).delete();
+                LOGGER.trace(formatLogMessage(correlationId, "Deleted configmap " + cm.getMetadata().getName()));
+            } catch (KubernetesClientException e) {
+                LOGGER.warn(formatLogMessage(correlationId, "Failed to delete configmap " + cm.getMetadata().getName()),
+                        e);
+            }
+        }
+    }
+
+    private void createInstanceResources(AppDefinition appDef, int instanceId, String correlationId) {
+        Map<String, String> labels = new HashMap<>();
+
+        // Create services
+        resourceFactory.createServiceForEagerInstance(appDef, instanceId, labels, correlationId);
+        resourceFactory.createInternalServiceForEagerInstance(appDef, instanceId, labels, correlationId);
+
+        // Create configmaps (if using Keycloak)
+        if (arguments.isUseKeycloak()) {
+            resourceFactory.createProxyConfigMapForEagerInstance(appDef, instanceId, labels, correlationId);
+            resourceFactory.createEmailConfigMapForEagerInstance(appDef, instanceId, labels, correlationId);
+        }
+
+        // Create deployment
+        resourceFactory.createDeploymentForEagerInstance(appDef, instanceId, labels, correlationId);
+    }
+
+    private int parseInstanceIdOrDefault(Service service, int defaultValue) {
+        Integer id = parseInstanceId(service);
+        return id != null ? id : defaultValue;
+    }
+
+    private int parseDeploymentInstanceIdOrDefault(AppDefinition appDef, Deployment deployment, int defaultValue) {
+        Integer id = TheiaCloudDeploymentUtil.getId(null, appDef, deployment);
+        return id != null ? id : defaultValue;
+    }
+
+    private int parseConfigMapInstanceIdOrDefault(AppDefinition appDef, ConfigMap configMap, int defaultValue) {
+        // Try proxy first, then email
+        Integer id = TheiaCloudConfigMapUtil.getProxyId(null, appDef, configMap);
+        if (id != null) {
+            return id;
+        }
+        id = TheiaCloudConfigMapUtil.getEmailId(null, appDef, configMap);
+        return id != null ? id : defaultValue;
     }
 
     /**

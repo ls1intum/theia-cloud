@@ -178,7 +178,12 @@ public class EagerSessionHandler implements SessionHandler {
         }
 
         // Release instance back to pool
-        return pool.releaseInstance(session, appDef, correlationId);
+        boolean success = pool.releaseInstance(session, appDef, correlationId);
+
+        // Reconcile the specific instance
+        pool.reconcileInstance(appDef, instanceId, correlationId);
+
+        return success;
     }
 
     private void annotateSessionStrategy(Session session, String correlationId, String strategy) {

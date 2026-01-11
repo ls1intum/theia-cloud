@@ -37,9 +37,11 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 
+import static org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.APPDEFINITION_GENERATION_LABEL;
+
 /**
- * Factory for creating Kubernetes resources from templates.
- * Centralizes the pattern: load template → replace placeholders → add owner → apply.
+ * Factory for creating Kubernetes resources from templates. Centralizes the pattern: load template → replace
+ * placeholders → add owner → apply.
  */
 @Singleton
 public class K8sResourceFactory {
@@ -66,80 +68,67 @@ public class K8sResourceFactory {
     /**
      * Creates a service for a prewarmed (eager) instance.
      */
-    public Optional<Service> createServiceForEagerInstance(
-            AppDefinition appDef,
-            int instance,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<Service> createServiceForEagerInstance(AppDefinition appDef, int instance,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudServiceUtil.getServiceReplacements(
-                client.namespace(), appDef, instance);
+        Map<String, String> replacements = TheiaCloudServiceUtil.getServiceReplacements(client.namespace(), appDef,
+                instance);
 
-        String template = arguments.isUseKeycloak()
-                ? AddedHandlerUtil.TEMPLATE_SERVICE_YAML
+        String template = arguments.isUseKeycloak() ? AddedHandlerUtil.TEMPLATE_SERVICE_YAML
                 : AddedHandlerUtil.TEMPLATE_SERVICE_WITHOUT_AOUTH2_PROXY_YAML;
 
-        return createService(template, replacements,
-                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(),
-                        AppDefinition.API, AppDefinition.KIND),
-                labels, correlationId);
+        Map<String, String> labelsWithGeneration = addGenerationLabel(labels, appDef);
+
+        return createService(template, replacements, OwnerContext.of(appDef.getMetadata().getName(),
+                appDef.getMetadata().getUid(), AppDefinition.API, AppDefinition.KIND), labelsWithGeneration,
+                correlationId);
     }
 
     /**
      * Creates an internal service for a prewarmed (eager) instance.
      */
-    public Optional<Service> createInternalServiceForEagerInstance(
-            AppDefinition appDef,
-            int instance,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<Service> createInternalServiceForEagerInstance(AppDefinition appDef, int instance,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudServiceUtil.getInternalServiceReplacements(
-                client.namespace(), appDef, instance);
+        Map<String, String> replacements = TheiaCloudServiceUtil.getInternalServiceReplacements(client.namespace(),
+                appDef, instance);
+
+        Map<String, String> labelsWithGeneration = addGenerationLabel(labels, appDef);
 
         return createService(AddedHandlerUtil.TEMPLATE_INTERNAL_SERVICE_YAML, replacements,
-                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(),
-                        AppDefinition.API, AppDefinition.KIND),
-                labels, correlationId);
+                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(), AppDefinition.API,
+                        AppDefinition.KIND),
+                labelsWithGeneration, correlationId);
     }
 
     /**
      * Creates a service for a lazy session.
      */
-    public Optional<Service> createServiceForLazySession(
-            Session session,
-            AppDefinition appDef,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<Service> createServiceForLazySession(Session session, AppDefinition appDef,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudServiceUtil.getServiceReplacements(
-                client.namespace(), session, appDef.getSpec());
+        Map<String, String> replacements = TheiaCloudServiceUtil.getServiceReplacements(client.namespace(), session,
+                appDef.getSpec());
 
-        String template = arguments.isUseKeycloak()
-                ? AddedHandlerUtil.TEMPLATE_SERVICE_YAML
+        String template = arguments.isUseKeycloak() ? AddedHandlerUtil.TEMPLATE_SERVICE_YAML
                 : AddedHandlerUtil.TEMPLATE_SERVICE_WITHOUT_AOUTH2_PROXY_YAML;
 
-        return createService(template, replacements,
-                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(),
-                        Session.API, Session.KIND),
-                labels, correlationId);
+        return createService(template, replacements, OwnerContext.of(session.getMetadata().getName(),
+                session.getMetadata().getUid(), Session.API, Session.KIND), labels, correlationId);
     }
 
     /**
      * Creates an internal service for a lazy session.
      */
-    public Optional<Service> createInternalServiceForLazySession(
-            Session session,
-            AppDefinition appDef,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<Service> createInternalServiceForLazySession(Session session, AppDefinition appDef,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudServiceUtil.getInternalServiceReplacements(
-                client.namespace(), session, appDef.getSpec());
+        Map<String, String> replacements = TheiaCloudServiceUtil.getInternalServiceReplacements(client.namespace(),
+                session, appDef.getSpec());
 
-        return createService(AddedHandlerUtil.TEMPLATE_INTERNAL_SERVICE_YAML, replacements,
-                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(),
-                        Session.API, Session.KIND),
+        return createService(
+                AddedHandlerUtil.TEMPLATE_INTERNAL_SERVICE_YAML, replacements, OwnerContext
+                        .of(session.getMetadata().getName(), session.getMetadata().getUid(), Session.API, Session.KIND),
                 labels, correlationId);
     }
 
@@ -148,59 +137,42 @@ public class K8sResourceFactory {
     /**
      * Creates a deployment for a prewarmed (eager) instance.
      */
-    public Optional<Deployment> createDeploymentForEagerInstance(
-            AppDefinition appDef,
-            int instance,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<Deployment> createDeploymentForEagerInstance(AppDefinition appDef, int instance,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = deploymentReplacements.getReplacements(
-                client.namespace(), appDef, instance);
+        Map<String, String> replacements = deploymentReplacements.getReplacements(client.namespace(), appDef, instance);
 
-        String template = arguments.isUseKeycloak()
-                ? AddedHandlerUtil.TEMPLATE_DEPLOYMENT_YAML
+        String template = arguments.isUseKeycloak() ? AddedHandlerUtil.TEMPLATE_DEPLOYMENT_YAML
                 : AddedHandlerUtil.TEMPLATE_DEPLOYMENT_WITHOUT_AOUTH2_PROXY_YAML;
 
-        return createDeployment(template, replacements,
-                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(),
-                        AppDefinition.API, AppDefinition.KIND),
-                labels,
+        Map<String, String> labelsWithGeneration = addGenerationLabel(labels, appDef);
+
+        return createDeployment(template, replacements, OwnerContext.of(appDef.getMetadata().getName(),
+                appDef.getMetadata().getUid(), AppDefinition.API, AppDefinition.KIND), labelsWithGeneration,
                 deployment -> {
-                    bandwidthLimiter.limit(deployment,
-                            appDef.getSpec().getDownlinkLimit(),
-                            appDef.getSpec().getUplinkLimit(),
-                            correlationId);
+                    bandwidthLimiter.limit(deployment, appDef.getSpec().getDownlinkLimit(),
+                            appDef.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
                     if (appDef.getSpec().getPullSecret() != null && !appDef.getSpec().getPullSecret().isEmpty()) {
                         AddedHandlerUtil.addImagePullSecret(deployment, appDef.getSpec().getPullSecret());
                     }
-                },
-                correlationId);
+                }, correlationId);
     }
 
     /**
      * Creates a deployment for a lazy session.
      */
-    public Optional<Deployment> createDeploymentForLazySession(
-            Session session,
-            AppDefinition appDef,
-            Optional<String> pvName,
-            Map<String, String> labels,
-            Consumer<Deployment> volumeHandler,
+    public Optional<Deployment> createDeploymentForLazySession(Session session, AppDefinition appDef,
+            Optional<String> pvName, Map<String, String> labels, Consumer<Deployment> volumeHandler,
             String correlationId) {
 
-        Map<String, String> replacements = deploymentReplacements.getReplacements(
-                client.namespace(), appDef, session);
+        Map<String, String> replacements = deploymentReplacements.getReplacements(client.namespace(), appDef, session);
 
-        String template = arguments.isUseKeycloak()
-                ? AddedHandlerUtil.TEMPLATE_DEPLOYMENT_YAML
+        String template = arguments.isUseKeycloak() ? AddedHandlerUtil.TEMPLATE_DEPLOYMENT_YAML
                 : AddedHandlerUtil.TEMPLATE_DEPLOYMENT_WITHOUT_AOUTH2_PROXY_YAML;
 
-        return createDeployment(template, replacements,
-                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(),
-                        Session.API, Session.KIND),
-                labels,
-                deployment -> {
+        return createDeployment(template, replacements, OwnerContext.of(session.getMetadata().getName(),
+                session.getMetadata().getUid(), Session.API, Session.KIND), labels, deployment -> {
                     // Apply session-specific labels to pod template
                     Map<String, String> podLabels = deployment.getSpec().getTemplate().getMetadata().getLabels();
                     if (podLabels == null) {
@@ -214,10 +186,8 @@ public class K8sResourceFactory {
                         volumeHandler.accept(deployment);
                     }
 
-                    bandwidthLimiter.limit(deployment,
-                            appDef.getSpec().getDownlinkLimit(),
-                            appDef.getSpec().getUplinkLimit(),
-                            correlationId);
+                    bandwidthLimiter.limit(deployment, appDef.getSpec().getDownlinkLimit(),
+                            appDef.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
                     AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
                             appDef);
@@ -225,8 +195,7 @@ public class K8sResourceFactory {
                     if (appDef.getSpec().getPullSecret() != null && !appDef.getSpec().getPullSecret().isEmpty()) {
                         AddedHandlerUtil.addImagePullSecret(deployment, appDef.getSpec().getPullSecret());
                     }
-                },
-                correlationId);
+                }, correlationId);
     }
 
     // ========== ConfigMap Creation ==========
@@ -234,149 +203,120 @@ public class K8sResourceFactory {
     /**
      * Creates a proxy config map for a prewarmed (eager) instance.
      */
-    public Optional<ConfigMap> createProxyConfigMapForEagerInstance(
-            AppDefinition appDef,
-            int instance,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<ConfigMap> createProxyConfigMapForEagerInstance(AppDefinition appDef, int instance,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudConfigMapUtil.getProxyConfigMapReplacements(
-                client.namespace(), appDef, instance);
+        Map<String, String> replacements = TheiaCloudConfigMapUtil.getProxyConfigMapReplacements(client.namespace(),
+                appDef, instance);
 
         String host = arguments.getInstancesHost() + pathProvider.getPath(appDef, instance);
         int port = appDef.getSpec().getPort();
 
+        Map<String, String> labelsWithGeneration = addGenerationLabel(labels, appDef);
+
         return createConfigMap(AddedHandlerUtil.TEMPLATE_CONFIGMAP_YAML, replacements,
-                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(),
-                        AppDefinition.API, AppDefinition.KIND),
-                labels,
-                configMap -> AddedHandlerUtil.updateProxyConfigMap(
-                        client.kubernetes(), client.namespace(), configMap, host, port),
+                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(), AppDefinition.API,
+                        AppDefinition.KIND),
+                labelsWithGeneration, configMap -> AddedHandlerUtil.updateProxyConfigMap(client.kubernetes(),
+                        client.namespace(), configMap, host, port),
                 correlationId);
     }
 
     /**
      * Creates an email config map for a prewarmed (eager) instance.
      */
-    public Optional<ConfigMap> createEmailConfigMapForEagerInstance(
-            AppDefinition appDef,
-            int instance,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<ConfigMap> createEmailConfigMapForEagerInstance(AppDefinition appDef, int instance,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudConfigMapUtil.getEmailConfigMapReplacements(
-                client.namespace(), appDef, instance);
+        Map<String, String> replacements = TheiaCloudConfigMapUtil.getEmailConfigMapReplacements(client.namespace(),
+                appDef, instance);
+
+        Map<String, String> labelsWithGeneration = addGenerationLabel(labels, appDef);
 
         return createConfigMap(AddedHandlerUtil.TEMPLATE_CONFIGMAP_EMAILS_YAML, replacements,
-                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(),
-                        AppDefinition.API, AppDefinition.KIND),
-                labels, null, correlationId);
+                OwnerContext.of(appDef.getMetadata().getName(), appDef.getMetadata().getUid(), AppDefinition.API,
+                        AppDefinition.KIND),
+                labelsWithGeneration, null, correlationId);
     }
 
     /**
      * Creates a proxy config map for a lazy session.
      */
-    public Optional<ConfigMap> createProxyConfigMapForLazySession(
-            Session session,
-            AppDefinition appDef,
-            Map<String, String> labels,
-            String correlationId) {
+    public Optional<ConfigMap> createProxyConfigMapForLazySession(Session session, AppDefinition appDef,
+            Map<String, String> labels, String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudConfigMapUtil.getProxyConfigMapReplacements(
-                client.namespace(), session);
+        Map<String, String> replacements = TheiaCloudConfigMapUtil.getProxyConfigMapReplacements(client.namespace(),
+                session);
 
         String host = arguments.getInstancesHost() + pathProvider.getPath(appDef, session);
         int port = appDef.getSpec().getPort();
 
         return createConfigMap(AddedHandlerUtil.TEMPLATE_CONFIGMAP_YAML, replacements,
-                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(),
-                        Session.API, Session.KIND),
-                labels,
-                configMap -> AddedHandlerUtil.updateProxyConfigMap(
-                        client.kubernetes(), client.namespace(), configMap, host, port),
+                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(), Session.API,
+                        Session.KIND),
+                labels, configMap -> AddedHandlerUtil.updateProxyConfigMap(client.kubernetes(), client.namespace(),
+                        configMap, host, port),
                 correlationId);
     }
 
     /**
      * Creates an email config map for a lazy session.
      */
-    public Optional<ConfigMap> createEmailConfigMapForLazySession(
-            Session session,
-            Map<String, String> labels,
+    public Optional<ConfigMap> createEmailConfigMapForLazySession(Session session, Map<String, String> labels,
             String correlationId) {
 
-        Map<String, String> replacements = TheiaCloudConfigMapUtil.getEmailConfigMapReplacements(
-                client.namespace(), session);
+        Map<String, String> replacements = TheiaCloudConfigMapUtil.getEmailConfigMapReplacements(client.namespace(),
+                session);
 
         return createConfigMap(AddedHandlerUtil.TEMPLATE_CONFIGMAP_EMAILS_YAML, replacements,
-                OwnerContext.of(session.getMetadata().getName(), session.getMetadata().getUid(),
-                        Session.API, Session.KIND),
+                OwnerContext
+                        .of(session.getMetadata().getName(), session.getMetadata().getUid(), Session.API, Session.KIND),
                 labels,
                 configMap -> configMap.setData(java.util.Collections.singletonMap(
-                        AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST,
-                        session.getSpec().getUser())),
+                        AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST, session.getSpec().getUser())),
                 correlationId);
     }
 
     // ========== Generic Creation Methods ==========
 
-    private Optional<Service> createService(
-            String templatePath,
-            Map<String, String> replacements,
-            OwnerContext owner,
-            Map<String, String> labels,
-            String correlationId) {
+    private Optional<Service> createService(String templatePath, Map<String, String> replacements, OwnerContext owner,
+            Map<String, String> labels, String correlationId) {
 
         String yaml = loadTemplate(templatePath, replacements, correlationId);
         if (yaml == null) {
             return Optional.empty();
         }
 
-        return K8sUtil.loadAndCreateServiceWithOwnerReference(
-                client.kubernetes(), client.namespace(), correlationId, yaml,
-                owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(),
-                0, labels != null ? labels : new HashMap<>());
+        return K8sUtil.loadAndCreateServiceWithOwnerReference(client.kubernetes(), client.namespace(), correlationId,
+                yaml, owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(), 0,
+                labels != null ? labels : new HashMap<>());
     }
 
-    private Optional<Deployment> createDeployment(
-            String templatePath,
-            Map<String, String> replacements,
-            OwnerContext owner,
-            Map<String, String> labels,
-            Consumer<Deployment> postProcessor,
-            String correlationId) {
+    private Optional<Deployment> createDeployment(String templatePath, Map<String, String> replacements,
+            OwnerContext owner, Map<String, String> labels, Consumer<Deployment> postProcessor, String correlationId) {
 
         String yaml = loadTemplate(templatePath, replacements, correlationId);
         if (yaml == null) {
             return Optional.empty();
         }
 
-        return K8sUtil.loadAndCreateDeploymentWithOwnerReference(
-                client.kubernetes(), client.namespace(), correlationId, yaml,
-                owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(),
-                0, labels != null ? labels : new HashMap<>(),
-                postProcessor != null ? postProcessor : d -> {
+        return K8sUtil.loadAndCreateDeploymentWithOwnerReference(client.kubernetes(), client.namespace(), correlationId,
+                yaml, owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(), 0,
+                labels != null ? labels : new HashMap<>(), postProcessor != null ? postProcessor : d -> {
                 });
     }
 
-    private Optional<ConfigMap> createConfigMap(
-            String templatePath,
-            Map<String, String> replacements,
-            OwnerContext owner,
-            Map<String, String> labels,
-            Consumer<ConfigMap> postProcessor,
-            String correlationId) {
+    private Optional<ConfigMap> createConfigMap(String templatePath, Map<String, String> replacements,
+            OwnerContext owner, Map<String, String> labels, Consumer<ConfigMap> postProcessor, String correlationId) {
 
         String yaml = loadTemplate(templatePath, replacements, correlationId);
         if (yaml == null) {
             return Optional.empty();
         }
 
-        return K8sUtil.loadAndCreateConfigMapWithOwnerReference(
-                client.kubernetes(), client.namespace(), correlationId, yaml,
-                owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(),
-                0, labels != null ? labels : new HashMap<>(),
-                postProcessor != null ? postProcessor : cm -> {
+        return K8sUtil.loadAndCreateConfigMapWithOwnerReference(client.kubernetes(), client.namespace(), correlationId,
+                yaml, owner.getApiVersion(), owner.getKind(), owner.getName(), owner.getUid(), 0,
+                labels != null ? labels : new HashMap<>(), postProcessor != null ? postProcessor : cm -> {
                 });
     }
 
@@ -388,5 +328,13 @@ public class K8sResourceFactory {
             return null;
         }
     }
-}
 
+    /**
+     * Adds the AppDefinition generation label to track resource version.
+     */
+    private Map<String, String> addGenerationLabel(Map<String, String> labels, AppDefinition appDef) {
+        Map<String, String> result = labels != null ? new HashMap<>(labels) : new HashMap<>();
+        result.put(APPDEFINITION_GENERATION_LABEL, String.valueOf(appDef.getMetadata().getGeneration()));
+        return result;
+    }
+}

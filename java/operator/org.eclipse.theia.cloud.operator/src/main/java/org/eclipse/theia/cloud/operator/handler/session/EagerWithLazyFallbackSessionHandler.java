@@ -14,8 +14,8 @@ import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import com.google.inject.Inject;
 
 /**
- * Tries to handle a session with {@link EagerSessionHandler} first.
- * If there is no prewarmed capacity left, falls back to {@link LazySessionHandler}.
+ * Tries to handle a session with {@link EagerSessionHandler} first. If there is no prewarmed capacity left, falls back
+ * to {@link LazySessionHandler}.
  */
 public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
 
@@ -46,8 +46,8 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
         }
 
         // No capacity - fall back to lazy start
-        LOGGER.info(formatLogMessage(correlationId,
-                "No prewarmed capacity left. Falling back to lazy session handling."));
+        LOGGER.info(
+                formatLogMessage(correlationId, "No prewarmed capacity left. Falling back to lazy session handling."));
 
         boolean lazyResult = lazy.sessionAdded(session, correlationId);
         if (lazyResult) {
@@ -58,16 +58,15 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
 
     @Override
     public boolean sessionDeleted(Session session, String correlationId) {
-        String strategy = Optional.ofNullable(session.getMetadata())
-                .map(m -> m.getAnnotations())
-                .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION))
-                .orElse(null);
+        String strategy = Optional.ofNullable(session.getMetadata()).map(m -> m.getAnnotations())
+                .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION)).orElse(null);
 
-        // If started with eager, use eager cleanup (releases back to pool)
+        // If started with eager, use eager cleanup (releases back to pool + reconciliation)
         if (EagerSessionHandler.SESSION_START_STRATEGY_EAGER.equals(strategy)) {
             return eager.sessionDeleted(session, correlationId);
         }
-        // Otherwise use lazy cleanup (just ingress cleanup, K8s GC handles rest)
+
+        // Lazy cleanup: ingress cleanup, K8s GC handles resource deletion
         return lazy.sessionDeleted(session, correlationId);
     }
 

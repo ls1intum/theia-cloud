@@ -92,7 +92,23 @@ public class LangServerUtil {
         String lsHost = lsServiceName;
         LangServerDetails lsDetails = getLangServerDetails(lsImage, appDefinition);
 
-        List<EnvVar> envVars = deployment.getSpec().getTemplate().getSpec().getContainers().get(0).getEnv();
+        // Find the Theia container (not oauth2-proxy)
+        String theiaContainerName = appDefinition.getSpec().getName();
+        List<io.fabric8.kubernetes.api.model.Container> containers = deployment.getSpec().getTemplate().getSpec().getContainers();
+        io.fabric8.kubernetes.api.model.Container theiaContainer = null;
+        for (io.fabric8.kubernetes.api.model.Container container : containers) {
+            if (container.getName().equals(theiaContainerName)) {
+                theiaContainer = container;
+                break;
+            }
+        }
+
+        if (theiaContainer == null) {
+            LOGGER.error(formatLogMessage("N/A", "[LSSERVICE] Could not find Theia container named '" + theiaContainerName + "' in deployment"));
+            return;
+        }
+
+        List<EnvVar> envVars = theiaContainer.getEnv();
         envVars.removeIf(e -> e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_HOST)
                 || e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_PORT)
                 || e.getName().equals(AddedHandlerUtil.ENV_LS_RUST_HOST)

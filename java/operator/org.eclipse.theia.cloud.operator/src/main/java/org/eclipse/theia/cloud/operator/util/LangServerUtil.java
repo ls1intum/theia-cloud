@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
@@ -92,23 +93,17 @@ public class LangServerUtil {
         String lsHost = lsServiceName;
         LangServerDetails lsDetails = getLangServerDetails(lsImage, appDefinition);
 
-        // Find the Theia container (not oauth2-proxy)
-        String theiaContainerName = appDefinition.getSpec().getName();
-        List<io.fabric8.kubernetes.api.model.Container> containers = deployment.getSpec().getTemplate().getSpec().getContainers();
-        io.fabric8.kubernetes.api.model.Container theiaContainer = null;
-        for (io.fabric8.kubernetes.api.model.Container container : containers) {
-            if (container.getName().equals(theiaContainerName)) {
-                theiaContainer = container;
-                break;
-            }
-        }
-
-        if (theiaContainer == null) {
-            LOGGER.error(formatLogMessage("N/A", "[LSSERVICE] Could not find Theia container named '" + theiaContainerName + "' in deployment"));
+        // Find the correct container by name (not just index 0, which might be oauth2-proxy)
+        String containerName = appDefinition.getSpec().getName();
+        Optional<Integer> maybeContainerIdx = AddedHandlerUtil.findContainerIdxInDeployment(deployment, containerName);
+        
+        if (maybeContainerIdx.isEmpty()) {
+            LOGGER.error(formatLogMessage("N/A", "[LSSERVICE] Could not find container " + containerName + " in deployment " + deployment.getMetadata().getName()));
             return;
         }
-
-        List<EnvVar> envVars = theiaContainer.getEnv();
+        
+        int containerIdx = maybeContainerIdx.get();
+        List<EnvVar> envVars = deployment.getSpec().getTemplate().getSpec().getContainers().get(containerIdx).getEnv();
         envVars.removeIf(e -> e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_HOST)
                 || e.getName().equals(AddedHandlerUtil.ENV_LS_JAVA_PORT)
                 || e.getName().equals(AddedHandlerUtil.ENV_LS_RUST_HOST)

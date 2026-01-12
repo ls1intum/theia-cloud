@@ -315,7 +315,7 @@ public final class AddedHandlerUtil {
         return container;
     }
 
-    private static Optional<Integer> findContainerIdxInDeployment(Deployment deployment, String containerName) {
+    public static Optional<Integer> findContainerIdxInDeployment(Deployment deployment, String containerName) {
         List<Container> containers = deployment.getSpec().getTemplate().getSpec().getContainers();
         for (int i = 0; i < containers.size(); i++) {
             if (containers.get(i).getName().equals(containerName)) {

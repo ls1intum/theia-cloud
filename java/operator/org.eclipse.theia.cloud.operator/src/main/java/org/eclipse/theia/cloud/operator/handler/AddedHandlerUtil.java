@@ -91,6 +91,8 @@ public final class AddedHandlerUtil {
 
     public static final String CONFIGMAP_DATA_PLACEHOLDER_HOST = "https://placeholder";
     public static final String CONFIGMAP_DATA_PLACEHOLDER_PORT = "placeholder-port";
+    public static final String CONFIGMAP_DATA_PLACEHOLDER_COOKIE_SECRET = "cookie_secret=\"placeholder\"";
+    public static final String CONFIGMAP_DATA_PLACEHOLDER_CLIENT_SECRET = "client_secret=\"placeholder\"";
 
     public static final String FILENAME_AUTHENTICATED_EMAILS_LIST = "authenticated-emails-list";
 
@@ -127,13 +129,25 @@ public final class AddedHandlerUtil {
     }
 
     public static void updateProxyConfigMap(NamespacedKubernetesClient client, String namespace, ConfigMap configMap,
-            String host, int port) {
+            String host, int port, String secret) {
         ConfigMap templateConfigMap = client.configMaps().inNamespace(namespace).withName(OAUTH2_PROXY_CONFIGMAP_NAME)
                 .get();
         Map<String, String> data = new LinkedHashMap<>(templateConfigMap.getData());
+        
+        // OAuth2 Proxy requires cookie_secret to be 16, 24, or 32 bytes.
+        String cookieSecret = secret;
+        if (secret != null && secret.length() > 32) {
+            cookieSecret = secret.substring(0, 32);
+        } else if (secret != null && secret.length() < 16) {
+             // Pad with '0' to 16 chars if too short (fallback, though secret should be a UUID)
+             cookieSecret = String.format("%-16s", secret).replace(' ', '0');
+        }
+
         data.put(OAUTH2_PROXY_CFG, data.get(OAUTH2_PROXY_CFG)//
                 .replace(CONFIGMAP_DATA_PLACEHOLDER_HOST, HOST_PROTOCOL + host)//
-                .replace(CONFIGMAP_DATA_PLACEHOLDER_PORT, String.valueOf(port)));
+                .replace(CONFIGMAP_DATA_PLACEHOLDER_PORT, String.valueOf(port))//
+                .replace(CONFIGMAP_DATA_PLACEHOLDER_COOKIE_SECRET, "cookie_secret=\"" + cookieSecret + "\"")//
+                .replace(CONFIGMAP_DATA_PLACEHOLDER_CLIENT_SECRET, "client_secret=\"" + secret + "\""));
         configMap.setData(data);
     }
 

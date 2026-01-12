@@ -307,22 +307,6 @@ public class LazySessionHandler implements SessionHandler {
                     sessionResourceUID, appDefinition);
             LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
                     sessionResourceUID, appDefinition, lsImage, storageName);
-
-            /* Update Theia Deployment with LS env vars */
-            try {
-                client.kubernetes().apps().deployments().withName(sessionResourceName).edit(deployment -> {
-                    LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition);
-                    return deployment;
-                });
-                LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars"));
-            } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while updating Theia deployment with LS env vars"), e);
-                client.sessions().updateStatus(correlationId, session, s -> {
-                    s.setOperatorStatus(OperatorStatus.ERROR);
-                    s.setOperatorMessage("Failed to update Theia deployment with LS env vars.");
-                });
-                return false;
-            }
         }
         else {
             LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] No External Language Server Support configured for app definition " + appDefinitionID));
@@ -495,8 +479,9 @@ public class LazySessionHandler implements SessionHandler {
                 configMap -> {
                     String host = arguments.getInstancesHost() + ingressPathProvider.getPath(appDefinition, session);
                     int port = appDefinition.getSpec().getPort();
+                    String secret = session.getSpec().getSessionSecret();
                     AddedHandlerUtil.updateProxyConfigMap(client.kubernetes(), client.namespace(), configMap, host,
-                            port);
+                            port, secret);
                 });
     }
 
@@ -538,6 +523,14 @@ public class LazySessionHandler implements SessionHandler {
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {
                         AddedHandlerUtil.addImagePullSecret(deployment, appDefinition.getSpec().getPullSecret());
+                    }
+
+                    /* External Language Server Support - Inject Env Vars */
+                    if (appDefinition.getSpec().getOptions() != null
+                            && appDefinition.getSpec().getOptions().containsKey("langserver-image")) {
+                        String lsImage = appDefinition.getSpec().getOptions().get("langserver-image");
+                        LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition);
+                        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars (during creation)"));
                     }
                 });
     }

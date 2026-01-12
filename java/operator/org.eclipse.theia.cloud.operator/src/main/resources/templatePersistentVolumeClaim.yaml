@@ -7,7 +7,7 @@ metadata:
     theia-cloud.io/workspace-name: placeholder-label-workspace-name
 spec:
   accessModes:
-    - ReadWriteOnce
+    - placeholder-access-mode
   storageClassName: placeholder-storage-class-name
   resources:
     requests:

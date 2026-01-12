@@ -251,7 +251,8 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
                 labelsToAdd, configMap -> {
                     String host = arguments.getInstancesHost() + ingressPathProvider.getPath(appDefinition, instance);
                     int port = appDefinition.getSpec().getPort();
-                    AddedHandlerUtil.updateProxyConfigMap(client, namespace, configMap, host, port);
+                    String secret = java.util.UUID.randomUUID().toString();
+                    AddedHandlerUtil.updateProxyConfigMap(client, namespace, configMap, host, port, secret);
                 });
     }
 

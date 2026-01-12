@@ -31,6 +31,7 @@ public class DefaultPersistentVolumeTemplateReplacements implements PersistentVo
     public static final String PLACEHOLDER_LABEL_WORKSPACE_NAME = "placeholder-label-workspace-name";
     public static final String PLACEHOLDER_STORAGE_CLASS_NAME = "placeholder-storage-class-name";
     public static final String PLACEHOLDER_REQUESTED_STORAGE = "placeholder-requested-storage";
+    public static final String PLACEHOLDER_ACCESS_MODE = "placeholder-access-mode";
 
     public static final String DEFAULT_REQUESTED_STORAGE = "250Mi";
 
@@ -54,7 +55,16 @@ public class DefaultPersistentVolumeTemplateReplacements implements PersistentVo
         replacements.put(PLACEHOLDER_PERSISTENTVOLUMENAME, WorkspaceUtil.getStorageName(workspace));
         replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_NAMESPACE, namespace);
         replacements.put(PLACEHOLDER_LABEL_WORKSPACE_NAME, workspace.getSpec().getName());
-        replacements.put(PLACEHOLDER_STORAGE_CLASS_NAME, orEmpty(arguments.getStorageClassName()));
+        
+        String storageClassName = orEmpty(arguments.getStorageClassName());
+        replacements.put(PLACEHOLDER_STORAGE_CLASS_NAME, storageClassName);
+        
+        String accessMode = "ReadWriteOnce";
+        if ("longhorn".equals(storageClassName)) {
+            accessMode = "ReadWriteMany";
+        }
+        replacements.put(PLACEHOLDER_ACCESS_MODE, accessMode);
+
         replacements.put(PLACEHOLDER_REQUESTED_STORAGE,
                 orDefault(arguments.getRequestedStorage(), DEFAULT_REQUESTED_STORAGE));
         return replacements;

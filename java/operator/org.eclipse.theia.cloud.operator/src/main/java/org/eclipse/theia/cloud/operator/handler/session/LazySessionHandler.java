@@ -306,7 +306,7 @@ public class LazySessionHandler implements SessionHandler {
             LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
                     sessionResourceUID, appDefinition);
             LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
-                    sessionResourceUID, appDefinition, lsImage);
+                    sessionResourceUID, appDefinition, lsImage, storageName);
 
             /* Update Theia Deployment with LS env vars */
             try {

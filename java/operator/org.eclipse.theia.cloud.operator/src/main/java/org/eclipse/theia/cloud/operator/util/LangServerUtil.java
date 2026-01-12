@@ -10,12 +10,16 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
-import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
-import org.eclipse.theia.cloud.operator.handler.session.EagerSessionHandler;
 
+import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimVolumeSource;
+import io.fabric8.kubernetes.api.model.PodSpec;
+import io.fabric8.kubernetes.api.model.Volume;
+import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
@@ -55,7 +59,7 @@ public class LangServerUtil {
 
     public static void createAndApplyLSDeployment(NamespacedKubernetesClient client, String namespace, String correlationId,
             String sessionResourceName, String sessionResourceUID, AppDefinition appDefinition,
-            String lsImage) {
+            String lsImage, Optional<String> storageName) {
         LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Creating LS deployment for session " + sessionResourceName));
         Map<String, String> replacements = new HashMap<>();
         replacements.put("placeholder-depname", "ls-" + sessionResourceName);
@@ -68,6 +72,10 @@ public class LangServerUtil {
         
         replacements.put("placeholder-java-port", javaPort);
         replacements.put("placeholder-rust-port", rustPort);
+        
+        // Add PVC name if present, otherwise use empty string (template will handle it)
+        replacements.put("placeholder-pvc-name", storageName.orElse(""));
+        replacements.put("placeholder-mount-path", TheiaCloudPersistentVolumeUtil.getMountPath(appDefinition.getSpec()));
 
 
         String deploymentYaml;
@@ -82,9 +90,34 @@ public class LangServerUtil {
         K8sUtil.loadAndCreateDeploymentWithOwnerReference(client, namespace, correlationId, deploymentYaml,
                 "theia.cloud/v1beta9", "Session", sessionResourceName, sessionResourceUID, 0,
                 Collections.emptyMap(), deployment -> {
-                    // No extra processing needed for now
+                    // Add volume mount if PVC is present
+                    if (storageName.isPresent()) {
+                        addVolumeClaimToLSDeployment(deployment, storageName.get(), appDefinition.getSpec());
+                        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Added PVC " + storageName.get() + " to LS deployment"));
+                    } else {
+                        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] No PVC to mount (ephemeral session)"));
+                    }
                 });
         LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Successfully created LS deployment for session " + sessionResourceName));
+    }
+
+    private static void addVolumeClaimToLSDeployment(io.fabric8.kubernetes.api.model.apps.Deployment deployment, String pvcName, AppDefinitionSpec appDefinitionSpec) {
+        PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
+
+        // Add volume to pod spec
+        Volume volume = new Volume();
+        podSpec.getVolumes().add(volume);
+        volume.setName("workspace-data");
+        PersistentVolumeClaimVolumeSource persistentVolumeClaim = new PersistentVolumeClaimVolumeSource();
+        volume.setPersistentVolumeClaim(persistentVolumeClaim);
+        persistentVolumeClaim.setClaimName(pvcName);
+
+        // Add volume mount to the language server container (assumed to be the first/only container)
+        Container lsContainer = podSpec.getContainers().get(0);
+        VolumeMount volumeMount = new VolumeMount();
+        lsContainer.getVolumeMounts().add(volumeMount);
+        volumeMount.setName("workspace-data");
+        volumeMount.setMountPath(TheiaCloudPersistentVolumeUtil.getMountPath(appDefinitionSpec));
     }
 
     public static void updateTheiaDeploymentWithLangServerEnvVars(io.fabric8.kubernetes.api.model.apps.Deployment deployment, String sessionResourceName, String lsImage, AppDefinition appDefinition) {

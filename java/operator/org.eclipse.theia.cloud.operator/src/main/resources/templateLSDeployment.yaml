@@ -27,6 +27,7 @@ spec:
               name: java-ls
             - containerPort: placeholder-rust-port
               name: rust-ls
+          volumeMounts: []
           resources:
             limits:
               cpu: "500m"
@@ -34,3 +35,4 @@ spec:
             requests:
               cpu: "100m"
               memory: "256Mi"
+      volumes: []

@@ -171,17 +171,17 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_MONITOR_PORT, "");
         }
 
-        // Handle data bridge port
+        // Handle data bridge port and strategy
         boolean dataBridgeEnabled = DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec());
         if (!dataBridgeEnabled) {
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "0");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_STRATEGY, "");
         } else {
             int portNumber = DataBridgeUtil.getDataBridgePort(appDefinition.getSpec());
-            if (portNumber == appDefinition.getSpec().getPort()
-                    || (appDefinition.getSpec().getMonitor() != null
-                            && portNumber == appDefinition.getSpec().getMonitor().getPort())) {
+            if (portNumber == appDefinition.getSpec().getPort() || (appDefinition.getSpec().getMonitor() != null
+                    && portNumber == appDefinition.getSpec().getMonitor().getPort())) {
                 // Just remove the placeholder, otherwise the port would be duplicate
                 environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
                 environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");
@@ -194,6 +194,7 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
                         String.valueOf(portNumber));
             }
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENABLED, "1");
+            environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_STRATEGY, "data-bridge");
         }
 
         return environmentVariables;

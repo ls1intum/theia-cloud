@@ -28,9 +28,12 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
+import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
+import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool;
+import org.eclipse.theia.cloud.operator.util.SessionEnvCollector;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.PoolInstance;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationOutcome;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationResult;
@@ -67,6 +70,12 @@ public class EagerSessionHandler implements SessionHandler {
 
     @Inject
     private IngressManager ingressManager;
+
+    @Inject
+    private SessionEnvCollector sessionEnvCollector;
+
+    @Inject
+    private AsyncDataInjector asyncDataInjector;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
@@ -116,6 +125,14 @@ public class EagerSessionHandler implements SessionHandler {
         // Complete session setup (labels, deployment ownership, email config)
         if (!pool.completeSessionSetup(session, appDef, instance, correlationId)) {
             return EagerSessionAddedOutcome.ERROR;
+        }
+
+        // Schedule async credential injection via data bridge
+        if (DataBridgeUtil.isDataBridgeEnabled(appDef.getSpec())) {
+            Map<String, String> envVars = sessionEnvCollector.collect(session, correlationId);
+            if (!envVars.isEmpty()) {
+                asyncDataInjector.scheduleInjection(session, envVars, correlationId);
+            }
         }
 
         // Add ingress rule

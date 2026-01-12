@@ -73,6 +73,8 @@ spec:
             value: placeholder-data-bridge-env-port
           - name: DATA_BRIDGE_ENABLED
             value: placeholder-data-bridge-enabled
+          - name: SCORPIO_THEIA_ENV_STRATEGY
+            value: placeholder-data-bridge-strategy
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

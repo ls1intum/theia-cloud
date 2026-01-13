@@ -10,8 +10,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.operator.util.SentryHelper;
 
 import com.google.inject.Inject;
+
+import io.sentry.ISpan;
+import io.sentry.ITransaction;
+import io.sentry.SpanStatus;
 
 /**
  * Tries to handle a session with {@link EagerSessionHandler} first. If there is no prewarmed capacity left, falls back
@@ -35,39 +40,102 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
-        // Try eager start first
-        EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId);
+        String sessionName = session.getSpec().getName();
+        String appDef = session.getSpec().getAppDefinition();
+        String user = session.getSpec().getUser();
 
-        if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.HANDLED) {
-            return true;
-        }
-        if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.ERROR) {
-            return false;
-        }
+        ITransaction tx = SentryHelper.startSessionTransaction("added", sessionName, appDef, user, correlationId);
 
-        // No capacity - fall back to lazy start
-        LOGGER.info(
-                formatLogMessage(correlationId, "No prewarmed capacity left. Falling back to lazy session handling."));
+        try {
+            // Try eager start first
+            ISpan eagerSpan = tx.startChild("session.eager_attempt", "Attempt eager session start");
+            eagerSpan.setTag("session.strategy", "eager");
 
-        boolean lazyResult = lazy.sessionAdded(session, correlationId);
-        if (lazyResult) {
-            annotateSessionStrategy(session, correlationId, SESSION_START_STRATEGY_LAZY_FALLBACK);
+            EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId);
+            eagerSpan.setData("eager_outcome", eagerOutcome.name());
+
+            if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.HANDLED) {
+                SentryHelper.finishSuccess(eagerSpan);
+                tx.setTag("session.strategy", "eager");
+                SentryHelper.finishSuccess(tx);
+                return true;
+            }
+
+            if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.ERROR) {
+                SentryHelper.finishWithOutcome(eagerSpan, "error", SpanStatus.INTERNAL_ERROR);
+                tx.setTag("session.strategy", "eager");
+                SentryHelper.finishWithOutcome(tx, "error", SpanStatus.INTERNAL_ERROR);
+                return false;
+            }
+
+            // NO_CAPACITY - fall back to lazy
+            SentryHelper.finishWithOutcome(eagerSpan, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
+            SentryHelper.tagFallback(tx, "no_prewarmed_capacity");
+
+            LOGGER.info(formatLogMessage(correlationId,
+                    "No prewarmed capacity left. Falling back to lazy session handling."));
+
+            ISpan lazySpan = tx.startChild("session.lazy_fallback", "Fallback to lazy session start");
+            lazySpan.setTag("session.strategy", "lazy-fallback");
+            lazySpan.setTag("fallback.reason", "no_prewarmed_capacity");
+
+            boolean lazyResult = lazy.sessionAdded(session, correlationId);
+
+            if (lazyResult) {
+                annotateSessionStrategy(session, correlationId, SESSION_START_STRATEGY_LAZY_FALLBACK);
+                SentryHelper.finishSuccess(lazySpan);
+                tx.setTag("session.strategy", "lazy-fallback");
+                SentryHelper.finishSuccess(tx);
+            } else {
+                SentryHelper.finishWithOutcome(lazySpan, "failure", SpanStatus.INTERNAL_ERROR);
+                tx.setTag("session.strategy", "lazy-fallback");
+                SentryHelper.finishWithOutcome(tx, "failure", SpanStatus.INTERNAL_ERROR);
+            }
+
+            return lazyResult;
+
+        } catch (Exception e) {
+            SentryHelper.captureError(e, "session.added", correlationId);
+            SentryHelper.finishError(tx, e);
+            throw e;
         }
-        return lazyResult;
     }
 
     @Override
     public boolean sessionDeleted(Session session, String correlationId) {
-        String strategy = Optional.ofNullable(session.getMetadata()).map(m -> m.getAnnotations())
-                .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION)).orElse(null);
+        String sessionName = session.getSpec().getName();
+        String appDef = session.getSpec().getAppDefinition();
+        String user = session.getSpec().getUser();
 
-        // If started with eager, use eager cleanup (releases back to pool + reconciliation)
-        if (EagerSessionHandler.SESSION_START_STRATEGY_EAGER.equals(strategy)) {
-            return eager.sessionDeleted(session, correlationId);
+        ITransaction tx = SentryHelper.startSessionTransaction("deleted", sessionName, appDef, user, correlationId);
+
+        try {
+            String strategy = Optional.ofNullable(session.getMetadata()).map(m -> m.getAnnotations())
+                    .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION)).orElse("unknown");
+
+            tx.setTag("session.start_strategy", strategy);
+
+            boolean result;
+            if (EagerSessionHandler.SESSION_START_STRATEGY_EAGER.equals(strategy)) {
+                ISpan span = tx.startChild("session.eager_cleanup", "Eager session cleanup");
+                span.setTag("cleanup.type", "eager");
+                result = eager.sessionDeleted(session, correlationId);
+                SentryHelper.finishWithOutcome(span, result);
+            } else {
+                ISpan span = tx.startChild("session.lazy_cleanup", "Lazy session cleanup");
+                span.setTag("cleanup.type", "lazy");
+                result = lazy.sessionDeleted(session, correlationId);
+                SentryHelper.finishWithOutcome(span, result);
+            }
+
+            SentryHelper.finishWithOutcome(tx, result);
+            return result;
+
+        } catch (Exception e) {
+            SentryHelper.captureError(e, "session.deleted", correlationId);
+            SentryHelper.finishError(tx, e);
+            throw e;
         }
-
-        // Lazy cleanup: ingress cleanup, K8s GC handles resource deletion
-        return lazy.sessionDeleted(session, correlationId);
     }
 
     private void annotateSessionStrategy(Session session, String correlationId, String strategy) {

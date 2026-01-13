@@ -24,6 +24,9 @@ import org.eclipse.theia.cloud.operator.util.OwnershipManager.OwnerContext;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import io.sentry.ISpan;
+import io.sentry.Sentry;
+import io.sentry.SpanStatus;
 
 /**
  * Unified manager for Kubernetes resource lifecycle operations.
@@ -214,100 +217,188 @@ public final class ResourceLifecycleManager {
      * - If we're one of multiple owners and resource needs recreation, we skip it
      */
     public static <T extends HasMetadata> ReconcileResult reconcile(ReconcileContext<T> ctx) {
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("lifecycle.reconcile", "Reconcile " + ctx.resourceTypeName)
+                : null;
+
+        if (span != null) {
+            span.setTag("resource.type", ctx.resourceTypeName);
+            span.setData("target_count", ctx.targetCount);
+            span.setData("existing_count", ctx.existingResources.size());
+            span.setData("missing_count", ctx.missingIds.size());
+        }
+
         boolean success = true;
         int created = 0;
         int deleted = 0;
         int recreated = 0;
         int skipped = 0;
 
-        // Step 1: Create missing resources
-        for (int instanceId : ctx.missingIds) {
-            try {
-                ctx.createResource.accept(instanceId);
-                created++;
-            } catch (Exception e) {
-                LOGGER.error(formatLogMessage(ctx.correlationId,
-                        "Failed to create " + ctx.resourceTypeName + " for instance " + instanceId), e);
-                success = false;
-            }
-        }
+        try {
+            // Step 1: Create missing resources
+            for (int instanceId : ctx.missingIds) {
+                ISpan createSpan = span != null
+                        ? span.startChild("lifecycle.create", "Create " + ctx.resourceTypeName + " " + instanceId)
+                        : null;
+                if (createSpan != null) {
+                    createSpan.setTag("resource.type", ctx.resourceTypeName);
+                    createSpan.setTag("resource.operation", "create");
+                    createSpan.setData("instance_id", instanceId);
+                }
 
-        // Step 2: Process existing resources
-        for (T resource : ctx.existingResources) {
-            Integer id = ctx.idExtractor.apply(resource);
-            if (id == null) {
-                LOGGER.warn(formatLogMessage(ctx.correlationId,
-                        "Cannot extract ID from " + ctx.resourceTypeName + " " + resource.getMetadata().getName()));
-                skipped++;
-                continue;
-            }
-
-            String resourceName = resource.getMetadata().getName();
-
-            // Case A: Resource ID > target count → should be deleted
-            if (id > ctx.targetCount) {
-                if (OwnershipManager.isOwnedSolelyBy(resource, ctx.owner)) {
-                    // We're the only owner → delete
-                    try {
-                        ctx.resourceAccessor.apply(resource).delete();
-                        deleted++;
-                        LOGGER.info(formatLogMessage(ctx.correlationId,
-                                "Deleted excess " + ctx.resourceTypeName + " " + resourceName));
-                    } catch (Exception e) {
-                        LOGGER.error(formatLogMessage(ctx.correlationId,
-                                "Failed to delete " + ctx.resourceTypeName + " " + resourceName), e);
-                        success = false;
+                try {
+                    ctx.createResource.accept(instanceId);
+                    created++;
+                    if (createSpan != null) {
+                        SentryHelper.finishSuccess(createSpan);
                     }
-                } else if (OwnershipManager.hasAdditionalOwners(resource, ctx.owner)) {
-                    // Other owners exist → just remove our reference
-                    try {
-                        ctx.resourceAccessor.apply(resource).edit(r -> {
-                            OwnershipManager.removeOwner(r, ctx.owner, ctx.correlationId);
-                            return r;
-                        });
-                        skipped++;
-                        LOGGER.info(formatLogMessage(ctx.correlationId,
-                                "Removed owner from " + ctx.resourceTypeName + " " + resourceName
-                                        + " (has other owners)"));
-                    } catch (Exception e) {
-                        LOGGER.error(formatLogMessage(ctx.correlationId,
-                                "Failed to remove owner from " + ctx.resourceTypeName + " " + resourceName), e);
-                        success = false;
+                } catch (Exception e) {
+                    LOGGER.error(formatLogMessage(ctx.correlationId,
+                            "Failed to create " + ctx.resourceTypeName + " for instance " + instanceId), e);
+                    success = false;
+                    if (createSpan != null) {
+                        SentryHelper.finishError(createSpan, e);
                     }
-                } else {
-                    // Not our resource at all
-                    skipped++;
                 }
             }
-            // Case B: Resource needs recreation
-            else if (ctx.shouldRecreate.test(resource)) {
-                if (OwnershipManager.isOwnedSolelyBy(resource, ctx.owner)) {
-                    try {
-                        ctx.resourceAccessor.apply(resource).delete();
-                        if (ctx.recreateResource != null) {
-                            ctx.recreateResource.accept(resource);
+
+            // Step 2: Process existing resources
+            for (T resource : ctx.existingResources) {
+                Integer id = ctx.idExtractor.apply(resource);
+                if (id == null) {
+                    LOGGER.warn(formatLogMessage(ctx.correlationId, "Cannot extract ID from " + ctx.resourceTypeName
+                            + " " + resource.getMetadata().getName()));
+                    skipped++;
+                    continue;
+                }
+
+                String resourceName = resource.getMetadata().getName();
+
+                // Case A: Resource ID > target count → should be deleted
+                if (id > ctx.targetCount) {
+                    if (OwnershipManager.isOwnedSolelyBy(resource, ctx.owner)) {
+                        ISpan deleteSpan = span != null
+                                ? span.startChild("lifecycle.delete", "Delete excess " + ctx.resourceTypeName)
+                                : null;
+                        if (deleteSpan != null) {
+                            deleteSpan.setTag("resource.type", ctx.resourceTypeName);
+                            deleteSpan.setTag("resource.operation", "delete");
+                            deleteSpan.setData("resource_name", resourceName);
+                            deleteSpan.setData("instance_id", id);
+                            deleteSpan.setTag("delete.reason", "excess");
                         }
-                        recreated++;
-                        LOGGER.info(formatLogMessage(ctx.correlationId,
-                                "Recreated " + ctx.resourceTypeName + " " + resourceName));
-                    } catch (Exception e) {
-                        LOGGER.error(formatLogMessage(ctx.correlationId,
-                                "Failed to recreate " + ctx.resourceTypeName + " " + resourceName), e);
-                        success = false;
-                    }
-                } else {
-                    // Has other owners → skip recreation, they'll handle it
-                    skipped++;
-                    LOGGER.debug(formatLogMessage(ctx.correlationId,
-                            "Skipping recreation of " + ctx.resourceTypeName + " " + resourceName
-                                    + " (has other owners)"));
-                }
-            }
-            // Case C: Resource is fine, no action needed
-        }
 
-        return success ? ReconcileResult.success(created, deleted, recreated, skipped)
-                : ReconcileResult.failure(created, deleted, recreated, skipped);
+                        try {
+                            ctx.resourceAccessor.apply(resource).delete();
+                            deleted++;
+                            LOGGER.info(formatLogMessage(ctx.correlationId,
+                                    "Deleted excess " + ctx.resourceTypeName + " " + resourceName));
+                            if (deleteSpan != null) {
+                                SentryHelper.finishSuccess(deleteSpan);
+                            }
+                        } catch (Exception e) {
+                            LOGGER.error(formatLogMessage(ctx.correlationId,
+                                    "Failed to delete " + ctx.resourceTypeName + " " + resourceName), e);
+                            success = false;
+                            if (deleteSpan != null) {
+                                SentryHelper.finishError(deleteSpan, e);
+                            }
+                        }
+                    } else if (OwnershipManager.hasAdditionalOwners(resource, ctx.owner)) {
+                        ISpan removeOwnerSpan = span != null
+                                ? span.startChild("lifecycle.remove_owner", "Remove owner from " + ctx.resourceTypeName)
+                                : null;
+                        if (removeOwnerSpan != null) {
+                            removeOwnerSpan.setTag("resource.type", ctx.resourceTypeName);
+                            removeOwnerSpan.setTag("resource.operation", "remove_owner");
+                            removeOwnerSpan.setData("resource_name", resourceName);
+                        }
+
+                        try {
+                            ctx.resourceAccessor.apply(resource).edit(r -> {
+                                OwnershipManager.removeOwner(r, ctx.owner, ctx.correlationId);
+                                return r;
+                            });
+                            skipped++;
+                            LOGGER.info(formatLogMessage(ctx.correlationId, "Removed owner from " + ctx.resourceTypeName
+                                    + " " + resourceName + " (has other owners)"));
+                            if (removeOwnerSpan != null) {
+                                SentryHelper.finishSuccess(removeOwnerSpan);
+                            }
+                        } catch (Exception e) {
+                            LOGGER.error(formatLogMessage(ctx.correlationId,
+                                    "Failed to remove owner from " + ctx.resourceTypeName + " " + resourceName), e);
+                            success = false;
+                            if (removeOwnerSpan != null) {
+                                SentryHelper.finishError(removeOwnerSpan, e);
+                            }
+                        }
+                    } else {
+                        skipped++;
+                    }
+                }
+                // Case B: Resource needs recreation
+                else if (ctx.shouldRecreate.test(resource)) {
+                    if (OwnershipManager.isOwnedSolelyBy(resource, ctx.owner)) {
+                        ISpan recreateSpan = span != null
+                                ? span.startChild("lifecycle.recreate", "Recreate " + ctx.resourceTypeName)
+                                : null;
+                        if (recreateSpan != null) {
+                            recreateSpan.setTag("resource.type", ctx.resourceTypeName);
+                            recreateSpan.setTag("resource.operation", "recreate");
+                            recreateSpan.setData("resource_name", resourceName);
+                            recreateSpan.setData("instance_id", id);
+                        }
+
+                        try {
+                            ctx.resourceAccessor.apply(resource).delete();
+                            if (ctx.recreateResource != null) {
+                                ctx.recreateResource.accept(resource);
+                            }
+                            recreated++;
+                            LOGGER.info(formatLogMessage(ctx.correlationId,
+                                    "Recreated " + ctx.resourceTypeName + " " + resourceName));
+                            if (recreateSpan != null) {
+                                SentryHelper.finishSuccess(recreateSpan);
+                            }
+                        } catch (Exception e) {
+                            LOGGER.error(formatLogMessage(ctx.correlationId,
+                                    "Failed to recreate " + ctx.resourceTypeName + " " + resourceName), e);
+                            success = false;
+                            if (recreateSpan != null) {
+                                SentryHelper.finishError(recreateSpan, e);
+                            }
+                        }
+                    } else {
+                        skipped++;
+                        LOGGER.debug(formatLogMessage(ctx.correlationId, "Skipping recreation of "
+                                + ctx.resourceTypeName + " " + resourceName + " (has other owners)"));
+                    }
+                }
+                // Case C: Resource is fine, no action needed
+            }
+
+            if (span != null) {
+                span.setData("created", created);
+                span.setData("deleted", deleted);
+                span.setData("recreated", recreated);
+                span.setData("skipped", skipped);
+                span.setTag("outcome", success ? "success" : "failure");
+                span.setTag("had_changes", (created + deleted + recreated) > 0 ? "true" : "false");
+                span.setStatus(success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
+                span.finish();
+            }
+
+            return success ? ReconcileResult.success(created, deleted, recreated, skipped)
+                    : ReconcileResult.failure(created, deleted, recreated, skipped);
+
+        } catch (Exception e) {
+            if (span != null) {
+                SentryHelper.finishError(span, e);
+            }
+            throw e;
+        }
     }
 
     /**
@@ -326,41 +417,103 @@ public final class ResourceLifecycleManager {
             String resourceTypeName,
             String correlationId) {
 
-        boolean success = true;
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("lifecycle.release_ownership", "Release " + resourceTypeName + " ownership")
+                : null;
 
-        for (T resource : resources) {
-            String resourceName = resource.getMetadata().getName();
-
-            if (OwnershipManager.isOwnedSolelyBy(resource, owner)) {
-                // We're the only owner → delete explicitly
-                try {
-                    resourceAccessor.apply(resource).delete();
-                    LOGGER.info(formatLogMessage(correlationId,
-                            "Deleted " + resourceTypeName + " " + resourceName + " (sole owner)"));
-                } catch (Exception e) {
-                    LOGGER.error(formatLogMessage(correlationId,
-                            "Failed to delete " + resourceTypeName + " " + resourceName), e);
-                    success = false;
-                }
-            } else if (OwnershipManager.hasAdditionalOwners(resource, owner)) {
-                // Other owners exist → remove our reference
-                try {
-                    resourceAccessor.apply(resource).edit(r -> {
-                        OwnershipManager.removeOwner(r, owner, correlationId);
-                        return r;
-                    });
-                    LOGGER.info(formatLogMessage(correlationId,
-                            "Removed owner from " + resourceTypeName + " " + resourceName));
-                } catch (Exception e) {
-                    LOGGER.error(formatLogMessage(correlationId,
-                            "Failed to remove owner from " + resourceTypeName + " " + resourceName), e);
-                    success = false;
-                }
-            }
-            // If we're not an owner at all, nothing to do
+        if (span != null) {
+            span.setTag("resource.type", resourceTypeName);
+            span.setData("resource_count", resources.size());
         }
 
-        return success;
+        boolean success = true;
+        int deleted = 0;
+        int released = 0;
+        int skipped = 0;
+
+        try {
+            for (T resource : resources) {
+                String resourceName = resource.getMetadata().getName();
+
+                if (OwnershipManager.isOwnedSolelyBy(resource, owner)) {
+                    ISpan deleteSpan = span != null
+                            ? span.startChild("lifecycle.delete_sole_owned", "Delete " + resourceTypeName)
+                            : null;
+                    if (deleteSpan != null) {
+                        deleteSpan.setTag("resource.type", resourceTypeName);
+                        deleteSpan.setTag("resource.operation", "delete");
+                        deleteSpan.setData("resource_name", resourceName);
+                        deleteSpan.setTag("delete.reason", "sole_owner");
+                    }
+
+                    try {
+                        resourceAccessor.apply(resource).delete();
+                        deleted++;
+                        LOGGER.info(formatLogMessage(correlationId,
+                                "Deleted " + resourceTypeName + " " + resourceName + " (sole owner)"));
+                        if (deleteSpan != null) {
+                            SentryHelper.finishSuccess(deleteSpan);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed to delete " + resourceTypeName + " " + resourceName), e);
+                        success = false;
+                        if (deleteSpan != null) {
+                            SentryHelper.finishError(deleteSpan, e);
+                        }
+                    }
+                } else if (OwnershipManager.hasAdditionalOwners(resource, owner)) {
+                    ISpan removeSpan = span != null
+                            ? span.startChild("lifecycle.remove_owner_ref", "Remove owner from " + resourceTypeName)
+                            : null;
+                    if (removeSpan != null) {
+                        removeSpan.setTag("resource.type", resourceTypeName);
+                        removeSpan.setTag("resource.operation", "remove_owner");
+                        removeSpan.setData("resource_name", resourceName);
+                    }
+
+                    try {
+                        resourceAccessor.apply(resource).edit(r -> {
+                            OwnershipManager.removeOwner(r, owner, correlationId);
+                            return r;
+                        });
+                        released++;
+                        LOGGER.info(formatLogMessage(correlationId,
+                                "Removed owner from " + resourceTypeName + " " + resourceName));
+                        if (removeSpan != null) {
+                            SentryHelper.finishSuccess(removeSpan);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Failed to remove owner from " + resourceTypeName + " " + resourceName), e);
+                        success = false;
+                        if (removeSpan != null) {
+                            SentryHelper.finishError(removeSpan, e);
+                        }
+                    }
+                } else {
+                    skipped++;
+                }
+            }
+
+            if (span != null) {
+                span.setData("deleted", deleted);
+                span.setData("released", released);
+                span.setData("skipped", skipped);
+                span.setTag("outcome", success ? "success" : "failure");
+                span.setStatus(success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
+                span.finish();
+            }
+
+            return success;
+
+        } catch (Exception e) {
+            if (span != null) {
+                SentryHelper.finishError(span, e);
+            }
+            throw e;
+        }
     }
 
     /**
@@ -381,4 +534,3 @@ public final class ResourceLifecycleManager {
         return releaseOwnership(filtered, owner, resourceAccessor, resourceTypeName, correlationId);
     }
 }
-

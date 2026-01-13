@@ -25,6 +25,7 @@ import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager.OwnerContext;
 import org.eclipse.theia.cloud.operator.util.ResourceLifecycleManager;
+import org.eclipse.theia.cloud.operator.util.SentryHelper;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
@@ -41,6 +42,9 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.PodResource;
+import io.sentry.ISpan;
+import io.sentry.Sentry;
+import io.sentry.SpanStatus;
 
 /**
  * Manages a pool of prewarmed (eager start) resources for an AppDefinition. Responsibilities: - Creating/scaling the
@@ -141,68 +145,140 @@ public class PrewarmedResourcePool {
      * deployments).
      */
     public boolean ensureCapacity(AppDefinition appDef, int minInstances, String correlationId) {
-        LOGGER.info(formatLogMessage(correlationId,
-                "Ensuring pool capacity: " + minInstances + " for " + appDef.getSpec().getName()));
+        String appDefName = appDef.getSpec().getName();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.ensure_capacity", "Ensure pool capacity")
+                : Sentry.startTransaction("pool.ensure_capacity", "pool");
 
-        String ownerName = appDef.getMetadata().getName();
-        String ownerUID = appDef.getMetadata().getUid();
-        Map<String, String> labels = new HashMap<>();
+        span.setTag("app_definition", appDefName);
+        span.setData("min_instances", minInstances);
 
-        // Get existing resources
-        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
-                ownerUID);
-        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
-        List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
+        LOGGER.info(formatLogMessage(correlationId, "Ensuring pool capacity: " + minInstances + " for " + appDefName));
 
-        // Compute missing IDs
-        Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
-                minInstances, existingServices);
-        Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDef,
-                correlationId, minInstances, existingDeployments);
+        try {
+            String ownerName = appDef.getMetadata().getName();
+            String ownerUID = appDef.getMetadata().getUid();
+            Map<String, String> labels = new HashMap<>();
 
-        boolean success = true;
+            // Get existing resources
+            ISpan fetchSpan = span.startChild("pool.fetch_existing", "Fetch existing resources");
+            List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
+            List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(),
+                    client.namespace(), ownerName, ownerUID);
+            List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
 
-        // Create missing services
-        for (int instance : missingServiceIds) {
-            success &= resourceFactory.createServiceForEagerInstance(appDef, instance, labels, correlationId)
-                    .isPresent();
-            success &= resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels, correlationId)
-                    .isPresent();
-        }
+            fetchSpan.setData("existing_services", existingServices.size());
+            fetchSpan.setData("existing_deployments", existingDeployments.size());
+            fetchSpan.setData("existing_configmaps", existingConfigMaps.size());
+            SentryHelper.finishSuccess(fetchSpan);
 
-        // Create missing configmaps (if using Keycloak)
-        if (arguments.isUseKeycloak()) {
-            List<ConfigMap> proxyConfigMaps = existingConfigMaps.stream()
-                    .filter(cm -> "proxy".equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
-                    .collect(Collectors.toList());
-            List<ConfigMap> emailConfigMaps = existingConfigMaps.stream()
-                    .filter(cm -> "emails".equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
-                    .collect(Collectors.toList());
+            // Compute missing IDs
+            Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
+                    minInstances, existingServices);
+            Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDef,
+                    correlationId, minInstances, existingDeployments);
 
-            Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDef,
-                    correlationId, minInstances, proxyConfigMaps);
-            Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDef,
-                    correlationId, minInstances, emailConfigMaps);
+            span.setData("missing_service_ids", missingServiceIds.size());
+            span.setData("missing_deployment_ids", missingDeploymentIds.size());
 
-            for (int instance : missingProxyIds) {
-                success &= resourceFactory.createProxyConfigMapForEagerInstance(appDef, instance, labels, correlationId)
-                        .isPresent();
+            boolean success = true;
+
+            // Create missing services
+            if (!missingServiceIds.isEmpty()) {
+                ISpan serviceSpan = span.startChild("pool.create_services", "Create missing services");
+                serviceSpan.setData("count", missingServiceIds.size());
+                int created = 0;
+                int failed = 0;
+                for (int instance : missingServiceIds) {
+                    ISpan svcSpan = serviceSpan.startChild("k8s.service.create", "Create service " + instance);
+                    svcSpan.setData("instance_id", instance);
+                    boolean extOk = resourceFactory.createServiceForEagerInstance(appDef, instance, labels,
+                            correlationId).isPresent();
+                    boolean intOk = resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels,
+                            correlationId).isPresent();
+                    if (extOk && intOk) {
+                        created++;
+                        SentryHelper.finishSuccess(svcSpan);
+                    } else {
+                        failed++;
+                        success = false;
+                        SentryHelper.finishWithOutcome(svcSpan, "failure", SpanStatus.INTERNAL_ERROR);
+                    }
+                }
+                serviceSpan.setData("created", created);
+                serviceSpan.setData("failed", failed);
+                SentryHelper.finishWithOutcome(serviceSpan, failed == 0);
             }
-            for (int instance : missingEmailIds) {
-                success &= resourceFactory.createEmailConfigMapForEagerInstance(appDef, instance, labels, correlationId)
-                        .isPresent();
+
+            // Create missing configmaps (if using Keycloak)
+            if (arguments.isUseKeycloak()) {
+                List<ConfigMap> proxyConfigMaps = existingConfigMaps.stream()
+                        .filter(cm -> "proxy"
+                                .equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
+                        .collect(Collectors.toList());
+                List<ConfigMap> emailConfigMaps = existingConfigMaps.stream()
+                        .filter(cm -> "emails"
+                                .equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
+                        .collect(Collectors.toList());
+
+                Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDef,
+                        correlationId, minInstances, proxyConfigMaps);
+                Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDef,
+                        correlationId, minInstances, emailConfigMaps);
+
+                if (!missingProxyIds.isEmpty() || !missingEmailIds.isEmpty()) {
+                    ISpan cmSpan = span.startChild("pool.create_configmaps", "Create missing configmaps");
+                    cmSpan.setData("missing_proxy", missingProxyIds.size());
+                    cmSpan.setData("missing_email", missingEmailIds.size());
+
+                    for (int instance : missingProxyIds) {
+                        success &= resourceFactory
+                                .createProxyConfigMapForEagerInstance(appDef, instance, labels, correlationId)
+                                .isPresent();
+                    }
+                    for (int instance : missingEmailIds) {
+                        success &= resourceFactory
+                                .createEmailConfigMapForEagerInstance(appDef, instance, labels, correlationId)
+                                .isPresent();
+                    }
+                    SentryHelper.finishWithOutcome(cmSpan, success);
+                }
             }
-        }
 
-        // Create missing deployments
-        for (int instance : missingDeploymentIds) {
-            success &= resourceFactory.createDeploymentForEagerInstance(appDef, instance, labels, correlationId)
-                    .isPresent();
-        }
+            // Create missing deployments
+            if (!missingDeploymentIds.isEmpty()) {
+                ISpan deploySpan = span.startChild("pool.create_deployments", "Create missing deployments");
+                deploySpan.setData("count", missingDeploymentIds.size());
+                int created = 0;
+                int failed = 0;
+                for (int instance : missingDeploymentIds) {
+                    ISpan depSpan = deploySpan.startChild("k8s.deployment.create", "Create deployment " + instance);
+                    depSpan.setData("instance_id", instance);
+                    if (resourceFactory.createDeploymentForEagerInstance(appDef, instance, labels, correlationId)
+                            .isPresent()) {
+                        created++;
+                        SentryHelper.finishSuccess(depSpan);
+                    } else {
+                        failed++;
+                        success = false;
+                        SentryHelper.finishWithOutcome(depSpan, "failure", SpanStatus.INTERNAL_ERROR);
+                    }
+                }
+                deploySpan.setData("created", created);
+                deploySpan.setData("failed", failed);
+                SentryHelper.finishWithOutcome(deploySpan, failed == 0);
+            }
 
-        return success;
+            SentryHelper.finishWithOutcome(span, success);
+            return success;
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
+        }
     }
 
     /**
@@ -210,127 +286,188 @@ public class PrewarmedResourcePool {
      * (respecting ownership).
      */
     public boolean reconcile(AppDefinition appDef, int targetInstances, String correlationId) {
+        String appDefName = appDef.getSpec().getName();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.reconcile", "Reconcile pool")
+                : Sentry.startTransaction("pool.reconcile", "pool");
+
+        span.setTag("app_definition", appDefName);
+        span.setData("target_instances", targetInstances);
+        span.setData("generation", appDef.getMetadata().getGeneration());
+
         LOGGER.info(formatLogMessage(correlationId, "Reconciling pool to " + targetInstances + " instances"));
 
-        String ownerName = appDef.getMetadata().getName();
-        String ownerUID = appDef.getMetadata().getUid();
-        OwnerContext owner = OwnerContext.of(ownerName, ownerUID, AppDefinition.API, AppDefinition.KIND);
-        Map<String, String> labels = new HashMap<>();
+        try {
+            String ownerName = appDef.getMetadata().getName();
+            String ownerUID = appDef.getMetadata().getUid();
+            OwnerContext owner = OwnerContext.of(ownerName, ownerUID, AppDefinition.API, AppDefinition.KIND);
+            Map<String, String> labels = new HashMap<>();
 
-        boolean success = true;
+            boolean success = true;
 
-        // Reconcile services - must be done separately because the reconciler expects 1 resource per ID
-        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
-                ownerUID);
-        List<Service> externalServices = existingServices.stream()
-                .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
-        List<Service> internalServices = existingServices.stream()
-                .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
-        Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
-                targetInstances, existingServices);
-
-        // Reconcile external services
-        success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder()
-                .correlationId(correlationId).existingResources(externalServices).missingIds(missingServiceIds)
-                .targetCount(targetInstances).owner(owner)
-                .resourceAccessor(s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
-                .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s)).resourceTypeName("service")
-                .createResource(instance -> {
-                    resourceFactory.createServiceForEagerInstance(appDef, instance, labels, correlationId);
-                }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
-                    Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
-                    if (id != null) {
-                        resourceFactory.createServiceForEagerInstance(appDef, id, labels, correlationId);
-                    }
-                }).build()).isSuccess();
-
-        // Reconcile internal services
-        success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder()
-                .correlationId(correlationId).existingResources(internalServices).missingIds(missingServiceIds)
-                .targetCount(targetInstances).owner(owner)
-                .resourceAccessor(s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
-                .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s))
-                .resourceTypeName("internal service").createResource(instance -> {
-                    resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels, correlationId);
-                }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
-                    Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
-                    if (id != null) {
-                        resourceFactory.createInternalServiceForEagerInstance(appDef, id, labels, correlationId);
-                    }
-                }).build()).isSuccess();
-
-        // Reconcile configmaps (if using Keycloak)
-        if (arguments.isUseKeycloak()) {
-            List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+            // Reconcile services
+            ISpan serviceSpan = span.startChild("pool.reconcile_services", "Reconcile services");
+            List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
                     ownerName, ownerUID);
-            List<ConfigMap> proxyConfigMaps = existingConfigMaps.stream()
-                    .filter(cm -> "proxy".equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
-                    .collect(Collectors.toList());
-            List<ConfigMap> emailConfigMaps = existingConfigMaps.stream()
-                    .filter(cm -> "emails".equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
-                    .collect(Collectors.toList());
+            List<Service> externalServices = existingServices.stream()
+                    .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+            List<Service> internalServices = existingServices.stream()
+                    .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+            Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
+                    targetInstances, existingServices);
 
-            Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDef,
-                    correlationId, targetInstances, proxyConfigMaps);
-            Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDef,
-                    correlationId, targetInstances, emailConfigMaps);
+            serviceSpan.setData("existing_external", externalServices.size());
+            serviceSpan.setData("existing_internal", internalServices.size());
+            serviceSpan.setData("missing", missingServiceIds.size());
 
-            success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext
-                    .<ConfigMap> builder().correlationId(correlationId).existingResources(proxyConfigMaps)
-                    .missingIds(missingProxyIds).targetCount(targetInstances).owner(owner)
-                    .resourceAccessor(
-                            cm -> client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm))
-                    .idExtractor(cm -> TheiaCloudConfigMapUtil.getProxyId(correlationId, appDef, cm))
-                    .resourceTypeName("proxy configmap")
-                    .createResource(instance -> resourceFactory.createProxyConfigMapForEagerInstance(appDef, instance,
-                            labels, correlationId))
-                    .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)).recreateResource(cm -> {
-                        Integer id = TheiaCloudConfigMapUtil.getProxyId(correlationId, appDef, cm);
-                        if (id != null) {
-                            resourceFactory.createProxyConfigMapForEagerInstance(appDef, id, labels, correlationId);
-                        }
-                    }).build()).isSuccess();
+            // Reconcile external services
+            ResourceLifecycleManager.ReconcileResult extResult = ResourceLifecycleManager
+                    .reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder().correlationId(correlationId)
+                            .existingResources(externalServices).missingIds(missingServiceIds)
+                            .targetCount(targetInstances).owner(owner)
+                            .resourceAccessor(
+                                    s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
+                            .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s))
+                            .resourceTypeName("service").createResource(instance -> {
+                                resourceFactory.createServiceForEagerInstance(appDef, instance, labels, correlationId);
+                            }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
+                                Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
+                                if (id != null) {
+                                    resourceFactory.createServiceForEagerInstance(appDef, id, labels, correlationId);
+                                }
+                            }).build());
+            success &= extResult.isSuccess();
 
-            success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext
-                    .<ConfigMap> builder().correlationId(correlationId).existingResources(emailConfigMaps)
-                    .missingIds(missingEmailIds).targetCount(targetInstances).owner(owner)
-                    .resourceAccessor(
-                            cm -> client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm))
-                    .idExtractor(cm -> TheiaCloudConfigMapUtil.getEmailId(correlationId, appDef, cm))
-                    .resourceTypeName("email configmap")
-                    .createResource(instance -> resourceFactory.createEmailConfigMapForEagerInstance(appDef, instance,
-                            labels, correlationId))
-                    .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)).recreateResource(cm -> {
-                        Integer id = TheiaCloudConfigMapUtil.getEmailId(correlationId, appDef, cm);
-                        if (id != null) {
-                            resourceFactory.createEmailConfigMapForEagerInstance(appDef, id, labels, correlationId);
-                        }
-                    }).build()).isSuccess();
+            // Reconcile internal services
+            ResourceLifecycleManager.ReconcileResult intResult = ResourceLifecycleManager
+                    .reconcile(ResourceLifecycleManager.ReconcileContext.<Service> builder().correlationId(correlationId)
+                            .existingResources(internalServices).missingIds(missingServiceIds)
+                            .targetCount(targetInstances).owner(owner)
+                            .resourceAccessor(
+                                    s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s))
+                            .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s))
+                            .resourceTypeName("internal service").createResource(instance -> {
+                                resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels,
+                                        correlationId);
+                            }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
+                                Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
+                                if (id != null) {
+                                    resourceFactory.createInternalServiceForEagerInstance(appDef, id, labels,
+                                            correlationId);
+                                }
+                            }).build());
+            success &= intResult.isSuccess();
+
+            SentryHelper.tagReconcileResult(serviceSpan, extResult.getCreated() + intResult.getCreated(),
+                    extResult.getDeleted() + intResult.getDeleted(),
+                    extResult.getRecreated() + intResult.getRecreated(),
+                    extResult.getSkipped() + intResult.getSkipped(), extResult.isSuccess() && intResult.isSuccess());
+            serviceSpan.finish();
+
+            // Reconcile configmaps (if using Keycloak)
+            if (arguments.isUseKeycloak()) {
+                ISpan cmSpan = span.startChild("pool.reconcile_configmaps", "Reconcile configmaps");
+                List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(),
+                        client.namespace(), ownerName, ownerUID);
+                List<ConfigMap> proxyConfigMaps = existingConfigMaps.stream()
+                        .filter(cm -> "proxy"
+                                .equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
+                        .collect(Collectors.toList());
+                List<ConfigMap> emailConfigMaps = existingConfigMaps.stream()
+                        .filter(cm -> "emails"
+                                .equals(cm.getMetadata().getLabels().get("theia-cloud.io/template-purpose")))
+                        .collect(Collectors.toList());
+
+                Set<Integer> missingProxyIds = TheiaCloudConfigMapUtil.computeIdsOfMissingProxyConfigMaps(appDef,
+                        correlationId, targetInstances, proxyConfigMaps);
+                Set<Integer> missingEmailIds = TheiaCloudConfigMapUtil.computeIdsOfMissingEmailConfigMaps(appDef,
+                        correlationId, targetInstances, emailConfigMaps);
+
+                ResourceLifecycleManager.ReconcileResult proxyResult = ResourceLifecycleManager
+                        .reconcile(ResourceLifecycleManager.ReconcileContext.<ConfigMap> builder()
+                                .correlationId(correlationId).existingResources(proxyConfigMaps)
+                                .missingIds(missingProxyIds).targetCount(targetInstances).owner(owner)
+                                .resourceAccessor(cm -> client.kubernetes().configMaps().inNamespace(client.namespace())
+                                        .resource(cm))
+                                .idExtractor(cm -> TheiaCloudConfigMapUtil.getProxyId(correlationId, appDef, cm))
+                                .resourceTypeName("proxy configmap")
+                                .createResource(instance -> resourceFactory
+                                        .createProxyConfigMapForEagerInstance(appDef, instance, labels, correlationId))
+                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)).recreateResource(cm -> {
+                                    Integer id = TheiaCloudConfigMapUtil.getProxyId(correlationId, appDef, cm);
+                                    if (id != null) {
+                                        resourceFactory.createProxyConfigMapForEagerInstance(appDef, id, labels,
+                                                correlationId);
+                                    }
+                                }).build());
+                success &= proxyResult.isSuccess();
+
+                ResourceLifecycleManager.ReconcileResult emailResult = ResourceLifecycleManager
+                        .reconcile(ResourceLifecycleManager.ReconcileContext.<ConfigMap> builder()
+                                .correlationId(correlationId).existingResources(emailConfigMaps)
+                                .missingIds(missingEmailIds).targetCount(targetInstances).owner(owner)
+                                .resourceAccessor(cm -> client.kubernetes().configMaps().inNamespace(client.namespace())
+                                        .resource(cm))
+                                .idExtractor(cm -> TheiaCloudConfigMapUtil.getEmailId(correlationId, appDef, cm))
+                                .resourceTypeName("email configmap")
+                                .createResource(instance -> resourceFactory
+                                        .createEmailConfigMapForEagerInstance(appDef, instance, labels, correlationId))
+                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)).recreateResource(cm -> {
+                                    Integer id = TheiaCloudConfigMapUtil.getEmailId(correlationId, appDef, cm);
+                                    if (id != null) {
+                                        resourceFactory.createEmailConfigMapForEagerInstance(appDef, id, labels,
+                                                correlationId);
+                                    }
+                                }).build());
+                success &= emailResult.isSuccess();
+
+                SentryHelper.tagReconcileResult(cmSpan, proxyResult.getCreated() + emailResult.getCreated(),
+                        proxyResult.getDeleted() + emailResult.getDeleted(),
+                        proxyResult.getRecreated() + emailResult.getRecreated(),
+                        proxyResult.getSkipped() + emailResult.getSkipped(),
+                        proxyResult.isSuccess() && emailResult.isSuccess());
+                cmSpan.finish();
+            }
+
+            // Reconcile deployments
+            ISpan deploySpan = span.startChild("pool.reconcile_deployments", "Reconcile deployments");
+            List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(),
+                    client.namespace(), ownerName, ownerUID);
+            Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDef,
+                    correlationId, targetInstances, existingDeployments);
+
+            deploySpan.setData("existing", existingDeployments.size());
+            deploySpan.setData("missing", missingDeploymentIds.size());
+
+            ResourceLifecycleManager.ReconcileResult deployResult = ResourceLifecycleManager
+                    .reconcile(ResourceLifecycleManager.ReconcileContext.<Deployment> builder()
+                            .correlationId(correlationId).existingResources(existingDeployments)
+                            .missingIds(missingDeploymentIds).targetCount(targetInstances).owner(owner)
+                            .resourceAccessor(d -> client.kubernetes().apps().deployments()
+                                    .inNamespace(client.namespace()).resource(d))
+                            .idExtractor(d -> TheiaCloudDeploymentUtil.getId(correlationId, appDef, d))
+                            .resourceTypeName("deployment").createResource(instance -> resourceFactory
+                                    .createDeploymentForEagerInstance(appDef, instance, labels, correlationId))
+                            .shouldRecreate(d -> OwnershipManager.isOwnedSolelyBy(d, owner)).recreateResource(d -> {
+                                Integer id = TheiaCloudDeploymentUtil.getId(correlationId, appDef, d);
+                                if (id != null) {
+                                    resourceFactory.createDeploymentForEagerInstance(appDef, id, labels, correlationId);
+                                }
+                            }).build());
+            success &= deployResult.isSuccess();
+
+            SentryHelper.tagReconcileResult(deploySpan, deployResult.getCreated(), deployResult.getDeleted(),
+                    deployResult.getRecreated(), deployResult.getSkipped(), deployResult.isSuccess());
+            deploySpan.finish();
+
+            SentryHelper.finishWithOutcome(span, success);
+            return success;
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
         }
-
-        // Reconcile deployments
-        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
-        Set<Integer> missingDeploymentIds = TheiaCloudDeploymentUtil.computeIdsOfMissingDeployments(appDef,
-                correlationId, targetInstances, existingDeployments);
-
-        success &= ResourceLifecycleManager.reconcile(ResourceLifecycleManager.ReconcileContext.<Deployment> builder()
-                .correlationId(correlationId).existingResources(existingDeployments).missingIds(missingDeploymentIds)
-                .targetCount(targetInstances).owner(owner)
-                .resourceAccessor(
-                        d -> client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d))
-                .idExtractor(d -> TheiaCloudDeploymentUtil.getId(correlationId, appDef, d))
-                .resourceTypeName("deployment")
-                .createResource(instance -> resourceFactory.createDeploymentForEagerInstance(appDef, instance, labels,
-                        correlationId))
-                .shouldRecreate(d -> OwnershipManager.isOwnedSolelyBy(d, owner)).recreateResource(d -> {
-                    Integer id = TheiaCloudDeploymentUtil.getId(correlationId, appDef, d);
-                    if (id != null) {
-                        resourceFactory.createDeploymentForEagerInstance(appDef, id, labels, correlationId);
-                    }
-                }).build()).isSuccess();
-
-        return success;
     }
 
     /**
@@ -338,66 +475,99 @@ public class PrewarmedResourcePool {
      * this instance - If resource generation != current AppDefinition generation → recreate - Otherwise → do nothing
      */
     public void reconcileInstance(AppDefinition appDef, int instanceId, String correlationId) {
+        String appDefName = appDef.getSpec().getName();
         int minInstances = appDef.getSpec().getMinInstances();
         long currentGeneration = appDef.getMetadata().getGeneration();
 
-        String ownerName = appDef.getMetadata().getName();
-        String ownerUID = appDef.getMetadata().getUid();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.reconcile_instance", "Reconcile instance " + instanceId)
+                : Sentry.startTransaction("pool.reconcile_instance", "pool");
 
-        LOGGER.info(formatLogMessage(correlationId, "Reconciling instance " + instanceId + " (minInstances="
-                + minInstances + ", generation=" + currentGeneration + ")"));
+        span.setTag("app_definition", appDefName);
+        span.setData("instance_id", instanceId);
+        span.setData("min_instances", minInstances);
+        span.setData("generation", currentGeneration);
 
-        // Find resources for this instance
-        List<Service> allServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
-                ownerUID);
-        List<Deployment> allDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
-        List<ConfigMap> allConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
+        try {
+            String ownerName = appDef.getMetadata().getName();
+            String ownerUID = appDef.getMetadata().getUid();
 
-        // Filter to just this instance (includes both external and internal services)
-        List<Service> instanceServices = allServices.stream().filter(s -> instanceId == parseInstanceIdOrDefault(s, -1))
-                .collect(Collectors.toList());
-        List<Deployment> instanceDeployments = allDeployments.stream()
-                .filter(d -> instanceId == parseDeploymentInstanceIdOrDefault(appDef, d, -1))
-                .collect(Collectors.toList());
-        List<ConfigMap> instanceConfigMaps = allConfigMaps.stream()
-                .filter(cm -> instanceId == parseConfigMapInstanceIdOrDefault(appDef, cm, -1))
-                .collect(Collectors.toList());
+            LOGGER.info(formatLogMessage(correlationId, "Reconciling instance " + instanceId + " (minInstances="
+                    + minInstances + ", generation=" + currentGeneration + ")"));
 
-        if (instanceId > minInstances) {
-            // Instance is outside pool size - delete everything
-            LOGGER.info(formatLogMessage(correlationId,
-                    "Instance " + instanceId + " exceeds minInstances (" + minInstances + "), deleting"));
-            deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
-            return;
+            // Find resources for this instance
+            List<Service> allServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
+                    ownerUID);
+            List<Deployment> allDeployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
+            List<ConfigMap> allConfigMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
+
+            // Filter to just this instance
+            List<Service> instanceServices = allServices.stream()
+                    .filter(s -> instanceId == parseInstanceIdOrDefault(s, -1)).collect(Collectors.toList());
+            List<Deployment> instanceDeployments = allDeployments.stream()
+                    .filter(d -> instanceId == parseDeploymentInstanceIdOrDefault(appDef, d, -1))
+                    .collect(Collectors.toList());
+            List<ConfigMap> instanceConfigMaps = allConfigMaps.stream()
+                    .filter(cm -> instanceId == parseConfigMapInstanceIdOrDefault(appDef, cm, -1))
+                    .collect(Collectors.toList());
+
+            span.setData("found_services", instanceServices.size());
+            span.setData("found_deployments", instanceDeployments.size());
+            span.setData("found_configmaps", instanceConfigMaps.size());
+
+            if (instanceId > minInstances) {
+                // Instance is outside pool size - delete everything
+                span.setTag("action", "delete_excess");
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Instance " + instanceId + " exceeds minInstances (" + minInstances + "), deleting"));
+
+                ISpan deleteSpan = span.startChild("pool.delete_excess_instance", "Delete excess instance");
+                deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                SentryHelper.finishSuccess(deleteSpan);
+                SentryHelper.finishSuccess(span);
+                return;
+            }
+
+            // Check if any resource is outdated (generation mismatch)
+            boolean outdated = isOutdated(instanceServices, currentGeneration)
+                    || isOutdated(instanceDeployments, currentGeneration)
+                    || isOutdated(instanceConfigMaps, currentGeneration);
+
+            if (outdated) {
+                span.setTag("action", "recreate_outdated");
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Instance " + instanceId + " has outdated resources, recreating"));
+
+                ISpan recreateSpan = span.startChild("pool.recreate_outdated_instance", "Recreate outdated instance");
+                deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                createInstanceResources(appDef, instanceId, correlationId);
+                SentryHelper.finishSuccess(recreateSpan);
+                SentryHelper.finishSuccess(span);
+                return;
+            }
+
+            span.setTag("action", "no_action");
+            LOGGER.info(formatLogMessage(correlationId, "Instance " + instanceId + " is up-to-date, no action needed"));
+            SentryHelper.finishSuccess(span);
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
         }
-
-        // Check if any resource is outdated (generation mismatch)
-        boolean outdated = isOutdated(instanceServices, currentGeneration)
-                || isOutdated(instanceDeployments, currentGeneration)
-                || isOutdated(instanceConfigMaps, currentGeneration);
-
-        if (outdated) {
-            LOGGER.info(
-                    formatLogMessage(correlationId, "Instance " + instanceId + " has outdated resources, recreating"));
-            deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
-            createInstanceResources(appDef, instanceId, correlationId);
-            return;
-        }
-
-        LOGGER.info(formatLogMessage(correlationId, "Instance " + instanceId + " is up-to-date, no action needed"));
     }
 
     private boolean isOutdated(List<? extends HasMetadata> resources, long currentGeneration) {
         for (var resource : resources) {
             Map<String, String> labels = resource.getMetadata().getLabels();
             if (labels == null) {
-                return true; // No labels means outdated
+                return true;
             }
             String genLabel = labels.get(APPDEFINITION_GENERATION_LABEL);
             if (genLabel == null) {
-                return true; // No generation label means outdated
+                return true;
             }
             try {
                 long resourceGen = Long.parseLong(genLabel);
@@ -405,7 +575,7 @@ public class PrewarmedResourcePool {
                     return true;
                 }
             } catch (NumberFormatException e) {
-                return true; // Invalid generation means outdated
+                return true;
             }
         }
         return false;
@@ -427,8 +597,8 @@ public class PrewarmedResourcePool {
                 client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d).delete();
                 LOGGER.trace(formatLogMessage(correlationId, "Deleted deployment " + d.getMetadata().getName()));
             } catch (KubernetesClientException e) {
-                LOGGER.warn(formatLogMessage(correlationId, "Failed to delete deployment " + d.getMetadata().getName()),
-                        e);
+                LOGGER.warn(
+                        formatLogMessage(correlationId, "Failed to delete deployment " + d.getMetadata().getName()), e);
             }
         }
         for (ConfigMap cm : configMaps) {
@@ -436,8 +606,8 @@ public class PrewarmedResourcePool {
                 client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm).delete();
                 LOGGER.trace(formatLogMessage(correlationId, "Deleted configmap " + cm.getMetadata().getName()));
             } catch (KubernetesClientException e) {
-                LOGGER.warn(formatLogMessage(correlationId, "Failed to delete configmap " + cm.getMetadata().getName()),
-                        e);
+                LOGGER.warn(
+                        formatLogMessage(correlationId, "Failed to delete configmap " + cm.getMetadata().getName()), e);
             }
         }
     }
@@ -445,17 +615,14 @@ public class PrewarmedResourcePool {
     private void createInstanceResources(AppDefinition appDef, int instanceId, String correlationId) {
         Map<String, String> labels = new HashMap<>();
 
-        // Create services
         resourceFactory.createServiceForEagerInstance(appDef, instanceId, labels, correlationId);
         resourceFactory.createInternalServiceForEagerInstance(appDef, instanceId, labels, correlationId);
 
-        // Create configmaps (if using Keycloak)
         if (arguments.isUseKeycloak()) {
             resourceFactory.createProxyConfigMapForEagerInstance(appDef, instanceId, labels, correlationId);
             resourceFactory.createEmailConfigMapForEagerInstance(appDef, instanceId, labels, correlationId);
         }
 
-        // Create deployment
         resourceFactory.createDeploymentForEagerInstance(appDef, instanceId, labels, correlationId);
     }
 
@@ -470,7 +637,6 @@ public class PrewarmedResourcePool {
     }
 
     private int parseConfigMapInstanceIdOrDefault(AppDefinition appDef, ConfigMap configMap, int defaultValue) {
-        // Try proxy first, then email
         Integer id = TheiaCloudConfigMapUtil.getProxyId(null, appDef, configMap);
         if (id != null) {
             return id;
@@ -483,33 +649,59 @@ public class PrewarmedResourcePool {
      * Releases all pool resources for an app definition (used during deletion).
      */
     public boolean releaseAll(AppDefinition appDef, String correlationId) {
-        LOGGER.info(formatLogMessage(correlationId, "Releasing all pool resources for " + appDef.getSpec().getName()));
+        String appDefName = appDef.getSpec().getName();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.release_all", "Release all pool resources")
+                : Sentry.startTransaction("pool.release_all", "pool");
 
-        String ownerName = appDef.getMetadata().getName();
-        String ownerUID = appDef.getMetadata().getUid();
-        OwnerContext owner = OwnerContext.of(ownerName, ownerUID);
+        span.setTag("app_definition", appDefName);
 
-        boolean success = true;
+        LOGGER.info(formatLogMessage(correlationId, "Releasing all pool resources for " + appDefName));
 
-        List<Service> services = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
-                ownerUID);
-        success &= ResourceLifecycleManager.releaseOwnership(services, owner,
-                s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s), "service",
-                correlationId);
+        try {
+            String ownerName = appDef.getMetadata().getName();
+            String ownerUID = appDef.getMetadata().getUid();
+            OwnerContext owner = OwnerContext.of(ownerName, ownerUID);
 
-        List<ConfigMap> configMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(), ownerName,
-                ownerUID);
-        success &= ResourceLifecycleManager.releaseOwnership(configMaps, owner,
-                cm -> client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm), "configmap",
-                correlationId);
+            boolean success = true;
 
-        List<Deployment> deployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
-                ownerName, ownerUID);
-        success &= ResourceLifecycleManager.releaseOwnership(deployments, owner,
-                d -> client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d), "deployment",
-                correlationId);
+            ISpan svcSpan = span.startChild("pool.release_services", "Release services");
+            List<Service> services = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(), ownerName,
+                    ownerUID);
+            svcSpan.setData("count", services.size());
+            success &= ResourceLifecycleManager.releaseOwnership(services, owner,
+                    s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s), "service",
+                    correlationId);
+            SentryHelper.finishWithOutcome(svcSpan, success);
 
-        return success;
+            ISpan cmSpan = span.startChild("pool.release_configmaps", "Release configmaps");
+            List<ConfigMap> configMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
+            cmSpan.setData("count", configMaps.size());
+            boolean cmSuccess = ResourceLifecycleManager.releaseOwnership(configMaps, owner,
+                    cm -> client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm), "configmap",
+                    correlationId);
+            success &= cmSuccess;
+            SentryHelper.finishWithOutcome(cmSpan, cmSuccess);
+
+            ISpan deploySpan = span.startChild("pool.release_deployments", "Release deployments");
+            List<Deployment> deployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
+                    ownerName, ownerUID);
+            deploySpan.setData("count", deployments.size());
+            boolean deploySuccess = ResourceLifecycleManager.releaseOwnership(deployments, owner,
+                    d -> client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d),
+                    "deployment", correlationId);
+            success &= deploySuccess;
+            SentryHelper.finishWithOutcome(deploySpan, deploySuccess);
+
+            SentryHelper.finishWithOutcome(span, success);
+            return success;
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
+        }
     }
 
     // ========== Instance Reservation ==========
@@ -518,88 +710,138 @@ public class PrewarmedResourcePool {
      * Reserves a prewarmed instance for a session. Adds the session as an owner of the instance's resources.
      */
     public synchronized ReservationResult reserveInstance(Session session, AppDefinition appDef, String correlationId) {
-        LOGGER.info(formatLogMessage(correlationId,
-                "Attempting to reserve instance for session " + session.getMetadata().getName()));
+        String sessionName = session.getSpec().getName();
+        String appDefName = appDef.getSpec().getName();
 
-        String appDefOwnerName = appDef.getMetadata().getName();
-        String appDefOwnerUID = appDef.getMetadata().getUid();
-        String sessionName = session.getMetadata().getName();
-        String sessionUID = session.getMetadata().getUid();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.reserve", "Reserve pool instance")
+                : Sentry.startTransaction("pool.reserve", "pool");
 
-        // Get all services for this app definition
-        List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
-                appDefOwnerName, appDefOwnerUID);
+        span.setTag("app_definition", appDefName);
+        span.setData("session_name", sessionName);
 
-        // Separate external and internal services
-        List<Service> externalServices = existingServices.stream()
-                .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
-        List<Service> internalServices = existingServices.stream()
-                .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+        LOGGER.info(formatLogMessage(correlationId, "Attempting to reserve instance for session " + sessionName));
 
-        // Check if session already has a reservation
-        Optional<Service> alreadyReservedExternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,
-                sessionUID, externalServices);
-        Optional<Service> alreadyReservedInternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,
-                sessionUID, internalServices);
+        try {
+            String appDefOwnerName = appDef.getMetadata().getName();
+            String appDefOwnerUID = appDef.getMetadata().getUid();
+            String sessionUID = session.getMetadata().getUid();
 
-        if (alreadyReservedExternal.isPresent() && alreadyReservedInternal.isPresent()) {
-            // Already fully reserved
-            Integer extId = parseInstanceId(alreadyReservedExternal.get());
-            Integer intId = parseInstanceId(alreadyReservedInternal.get());
-            if (extId == null || intId == null || !extId.equals(intId)) {
-                LOGGER.error(formatLogMessage(correlationId, "Reservation mismatch for session " + sessionName));
+            // Get all services for this app definition
+            List<Service> existingServices = K8sUtil.getExistingServices(client.kubernetes(), client.namespace(),
+                    appDefOwnerName, appDefOwnerUID);
+
+            // Separate external and internal services
+            List<Service> externalServices = existingServices.stream()
+                    .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+            List<Service> internalServices = existingServices.stream()
+                    .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+
+            // Track pool capacity
+            int totalCapacity = externalServices.size();
+            int availableCount = (int) externalServices.stream()
+                    .filter(s -> TheiaCloudServiceUtil.isUnusedService(s)).count();
+            SentryHelper.tagPoolCapacity(span, totalCapacity, availableCount);
+
+            // Check if session already has a reservation
+            Optional<Service> alreadyReservedExternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,
+                    sessionUID, externalServices);
+            Optional<Service> alreadyReservedInternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,
+                    sessionUID, internalServices);
+
+            if (alreadyReservedExternal.isPresent() && alreadyReservedInternal.isPresent()) {
+                Integer extId = parseInstanceId(alreadyReservedExternal.get());
+                Integer intId = parseInstanceId(alreadyReservedInternal.get());
+                if (extId == null || intId == null || !extId.equals(intId)) {
+                    LOGGER.error(formatLogMessage(correlationId, "Reservation mismatch for session " + sessionName));
+                    SentryHelper.tagReservationOutcome(span, "error", null);
+                    SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                    return ReservationResult.error();
+                }
+                String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, extId);
+                span.setTag("reservation.type", "already_reserved");
+                SentryHelper.tagReservationOutcome(span, "success", extId);
+                SentryHelper.finishSuccess(span);
+                return ReservationResult.success(new PoolInstance(extId, alreadyReservedExternal.get(),
+                        alreadyReservedInternal.get(), deploymentName));
+            }
+
+            // Build instance maps
+            Map<Integer, Service> externalByInstance = buildInstanceMap(externalServices);
+            Map<Integer, Service> internalByInstance = buildInstanceMap(internalServices);
+
+            // Handle partial reservation
+            if (alreadyReservedExternal.isPresent() ^ alreadyReservedInternal.isPresent()) {
+                span.setTag("reservation.type", "partial_recovery");
+                ReservationResult result = handlePartialReservation(session, appDef, alreadyReservedExternal,
+                        alreadyReservedInternal, externalByInstance, internalByInstance, correlationId);
+                SentryHelper.tagReservationOutcome(span, result.getOutcome().name().toLowerCase(),
+                        result.getInstance().map(PoolInstance::getInstanceId).orElse(null));
+                SentryHelper.finishWithOutcome(span,
+                        result.getOutcome() == ReservationOutcome.SUCCESS ? "success" : result.getOutcome().name().toLowerCase(),
+                        result.getOutcome() == ReservationOutcome.SUCCESS ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
+                return result;
+            }
+
+            // Find available instance
+            List<Integer> availableIds = externalByInstance.entrySet().stream()
+                    .filter(e -> TheiaCloudServiceUtil.isUnusedService(e.getValue())).filter(e -> {
+                        Service internal = internalByInstance.get(e.getKey());
+                        return internal != null && TheiaCloudServiceUtil.isUnusedService(internal);
+                    }).map(Map.Entry::getKey).sorted(Comparator.naturalOrder()).collect(Collectors.toList());
+
+            if (availableIds.isEmpty()) {
+                LOGGER.info(formatLogMessage(correlationId, "No prewarmed instances available"));
+                span.setTag("reservation.type", "no_capacity");
+                SentryHelper.tagReservationOutcome(span, "no_capacity", null);
+                SentryHelper.finishWithOutcome(span, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
+                return ReservationResult.noCapacity();
+            }
+
+            int chosenInstance = availableIds.get(0);
+            Service chosenExternal = externalByInstance.get(chosenInstance);
+            Service chosenInternal = internalByInstance.get(chosenInstance);
+
+            span.setTag("reservation.type", "new");
+            span.setData("chosen_instance", chosenInstance);
+
+            // Reserve both services
+            ISpan reserveExtSpan = span.startChild("pool.reserve_external_service", "Reserve external service");
+            try {
+                reserveService(chosenExternal, sessionName, sessionUID, correlationId);
+                SentryHelper.finishSuccess(reserveExtSpan);
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "Failed to reserve external service"), e);
+                SentryHelper.finishError(reserveExtSpan, e);
+                SentryHelper.tagReservationOutcome(span, "error", null);
+                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
                 return ReservationResult.error();
             }
-            String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, extId);
-            return ReservationResult.success(new PoolInstance(extId, alreadyReservedExternal.get(),
-                    alreadyReservedInternal.get(), deploymentName));
+
+            ISpan reserveIntSpan = span.startChild("pool.reserve_internal_service", "Reserve internal service");
+            try {
+                reserveService(chosenInternal, sessionName, sessionUID, correlationId);
+                SentryHelper.finishSuccess(reserveIntSpan);
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "Failed to reserve internal service"), e);
+                SentryHelper.finishError(reserveIntSpan, e);
+                rollbackReservation(chosenExternal, sessionName, sessionUID, correlationId);
+                SentryHelper.tagReservationOutcome(span, "error", null);
+                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                return ReservationResult.error();
+            }
+
+            String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, chosenInstance);
+            SentryHelper.tagReservationOutcome(span, "success", chosenInstance);
+            SentryHelper.finishSuccess(span);
+            return ReservationResult.success(new PoolInstance(chosenInstance, chosenExternal, chosenInternal,
+                    deploymentName));
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
         }
-
-        // Build instance maps
-        Map<Integer, Service> externalByInstance = buildInstanceMap(externalServices);
-        Map<Integer, Service> internalByInstance = buildInstanceMap(internalServices);
-
-        // Handle partial reservation
-        if (alreadyReservedExternal.isPresent() ^ alreadyReservedInternal.isPresent()) {
-            return handlePartialReservation(session, appDef, alreadyReservedExternal, alreadyReservedInternal,
-                    externalByInstance, internalByInstance, correlationId);
-        }
-
-        // Find available instance (both services must be unused)
-        List<Integer> availableIds = externalByInstance.entrySet().stream()
-                .filter(e -> TheiaCloudServiceUtil.isUnusedService(e.getValue())).filter(e -> {
-                    Service internal = internalByInstance.get(e.getKey());
-                    return internal != null && TheiaCloudServiceUtil.isUnusedService(internal);
-                }).map(Map.Entry::getKey).sorted(Comparator.naturalOrder()).collect(Collectors.toList());
-
-        if (availableIds.isEmpty()) {
-            LOGGER.info(formatLogMessage(correlationId, "No prewarmed instances available"));
-            return ReservationResult.noCapacity();
-        }
-
-        int chosenInstance = availableIds.get(0);
-        Service chosenExternal = externalByInstance.get(chosenInstance);
-        Service chosenInternal = internalByInstance.get(chosenInstance);
-
-        // Reserve both services
-        try {
-            reserveService(chosenExternal, sessionName, sessionUID, correlationId);
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to reserve external service"), e);
-            return ReservationResult.error();
-        }
-
-        try {
-            reserveService(chosenInternal, sessionName, sessionUID, correlationId);
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to reserve internal service"), e);
-            rollbackReservation(chosenExternal, sessionName, sessionUID, correlationId);
-            return ReservationResult.error();
-        }
-
-        String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, chosenInstance);
-        return ReservationResult
-                .success(new PoolInstance(chosenInstance, chosenExternal, chosenInternal, deploymentName));
     }
 
     /**
@@ -608,48 +850,77 @@ public class PrewarmedResourcePool {
     public boolean completeSessionSetup(Session session, AppDefinition appDef, PoolInstance instance,
             String correlationId) {
 
-        String sessionName = session.getMetadata().getName();
-        String sessionUID = session.getMetadata().getUid();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.complete_setup", "Complete session setup")
+                : Sentry.startTransaction("pool.complete_setup", "pool");
 
-        Map<String, String> sessionLabels = LabelsUtil.createSessionLabels(session, appDef);
+        span.setData("session_name", session.getSpec().getName());
+        span.setData("instance_id", instance.getInstanceId());
 
-        // Add labels to services
         try {
-            addSessionLabelsToService(instance.getExternalService(), sessionLabels, correlationId);
-            addSessionLabelsToService(instance.getInternalService(), sessionLabels, correlationId);
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to add session labels to services"), e);
-            return false;
-        }
+            String sessionName = session.getMetadata().getName();
+            String sessionUID = session.getMetadata().getUid();
 
-        // Reserve deployment
-        try {
-            client.kubernetes().apps().deployments().withName(instance.getDeploymentName()).edit(
-                    d -> TheiaCloudHandlerUtil.addOwnerReferenceToItem(correlationId, sessionName, sessionUID, d));
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to reserve deployment"), e);
-            return false;
-        }
+            Map<String, String> sessionLabels = LabelsUtil.createSessionLabels(session, appDef);
 
-        // Configure email config (if using Keycloak)
-        if (arguments.isUseKeycloak()) {
-            String emailConfigName = TheiaCloudConfigMapUtil.getEmailConfigName(appDef, instance.getInstanceId());
+            // Add labels to services
+            ISpan labelSpan = span.startChild("pool.add_session_labels", "Add session labels to services");
             try {
-                client.kubernetes().configMaps().withName(emailConfigName).edit(cm -> {
-                    cm.setData(Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST,
-                            session.getSpec().getUser()));
-                    return cm;
-                });
+                addSessionLabelsToService(instance.getExternalService(), sessionLabels, correlationId);
+                addSessionLabelsToService(instance.getInternalService(), sessionLabels, correlationId);
+                SentryHelper.finishSuccess(labelSpan);
             } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "Failed to configure email config"), e);
+                LOGGER.error(formatLogMessage(correlationId, "Failed to add session labels to services"), e);
+                SentryHelper.finishError(labelSpan, e);
+                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
                 return false;
             }
 
-            // Trigger pod refresh
-            refreshPods(instance.getDeploymentName(), correlationId);
-        }
+            // Reserve deployment
+            ISpan deploySpan = span.startChild("pool.reserve_deployment", "Reserve deployment");
+            try {
+                client.kubernetes().apps().deployments().withName(instance.getDeploymentName()).edit(
+                        d -> TheiaCloudHandlerUtil.addOwnerReferenceToItem(correlationId, sessionName, sessionUID, d));
+                SentryHelper.finishSuccess(deploySpan);
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "Failed to reserve deployment"), e);
+                SentryHelper.finishError(deploySpan, e);
+                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                return false;
+            }
 
-        return true;
+            // Configure email config (if using Keycloak)
+            if (arguments.isUseKeycloak()) {
+                ISpan emailSpan = span.startChild("pool.configure_email", "Configure email config");
+                String emailConfigName = TheiaCloudConfigMapUtil.getEmailConfigName(appDef, instance.getInstanceId());
+                try {
+                    client.kubernetes().configMaps().withName(emailConfigName).edit(cm -> {
+                        cm.setData(Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST,
+                                session.getSpec().getUser()));
+                        return cm;
+                    });
+                    SentryHelper.finishSuccess(emailSpan);
+                } catch (KubernetesClientException e) {
+                    LOGGER.error(formatLogMessage(correlationId, "Failed to configure email config"), e);
+                    SentryHelper.finishError(emailSpan, e);
+                    SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                    return false;
+                }
+
+                // Trigger pod refresh
+                ISpan refreshSpan = span.startChild("pool.refresh_pods", "Trigger pod refresh");
+                refreshPods(instance.getDeploymentName(), correlationId);
+                SentryHelper.finishSuccess(refreshSpan);
+            }
+
+            SentryHelper.finishSuccess(span);
+            return true;
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
+        }
     }
 
     /**
@@ -657,76 +928,112 @@ public class PrewarmedResourcePool {
      * session-specific data.
      */
     public boolean releaseInstance(Session session, AppDefinition appDef, String correlationId) {
-        LOGGER.info(
-                formatLogMessage(correlationId, "Releasing instance for session " + session.getMetadata().getName()));
+        String sessionName = session.getSpec().getName();
+        String appDefName = appDef.getSpec().getName();
 
-        String sessionName = session.getMetadata().getName();
-        String sessionUID = session.getMetadata().getUid();
+        ISpan parentSpan = Sentry.getSpan();
+        ISpan span = parentSpan != null
+                ? parentSpan.startChild("pool.release_instance", "Release pool instance")
+                : Sentry.startTransaction("pool.release_instance", "pool");
 
-        // Find services owned by this session
-        Map<String, String> sessionLabels = LabelsUtil.createSessionLabels(session, appDef);
-        List<Service> services = findServicesByLabels(sessionLabels, correlationId);
+        span.setTag("app_definition", appDefName);
+        span.setData("session_name", sessionName);
 
-        if (services.isEmpty()) {
-            LOGGER.error(
-                    formatLogMessage(correlationId, "No services found for session " + session.getSpec().getName()));
-            return false;
-        }
+        LOGGER.info(formatLogMessage(correlationId, "Releasing instance for session " + sessionName));
 
-        List<Service> externalServices = services.stream().filter(s -> !s.getMetadata().getName().endsWith("-int"))
-                .collect(Collectors.toList());
-        List<Service> internalServices = services.stream().filter(s -> s.getMetadata().getName().endsWith("-int"))
-                .collect(Collectors.toList());
-
-        if (externalServices.size() != 1 || internalServices.size() != 1) {
-            LOGGER.error(formatLogMessage(correlationId, "Expected 1 external and 1 internal service, found "
-                    + externalServices.size() + " and " + internalServices.size()));
-            return false;
-        }
-
-        Service externalService = externalServices.get(0);
-        Service internalService = internalServices.get(0);
-
-        // Get instance ID
-        Integer instanceId = parseInstanceId(externalService);
-        if (instanceId == null) {
-            LOGGER.error(formatLogMessage(correlationId, "Cannot determine instance ID from service"));
-            return false;
-        }
-
-        // Clean up services
-        boolean success = true;
-        success &= cleanupService(externalService, sessionName, sessionUID, correlationId);
-        success &= cleanupService(internalService, sessionName, sessionUID, correlationId);
-
-        // Clean up deployment
-        String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, instanceId);
         try {
-            client.kubernetes().apps().deployments().withName(deploymentName).edit(
-                    d -> TheiaCloudHandlerUtil.removeOwnerReferenceFromItem(correlationId, sessionName, sessionUID, d));
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to clean up deployment"), e);
-            success = false;
-        }
+            String sessionUID = session.getMetadata().getUid();
 
-        // Clear email config
-        if (arguments.isUseKeycloak()) {
-            String emailConfigName = TheiaCloudConfigMapUtil.getEmailConfigName(appDef, instanceId);
+            // Find services owned by this session
+            Map<String, String> sessionLabels = LabelsUtil.createSessionLabels(session, appDef);
+            List<Service> services = findServicesByLabels(sessionLabels, correlationId);
+
+            if (services.isEmpty()) {
+                LOGGER.error(formatLogMessage(correlationId,
+                        "No services found for session " + session.getSpec().getName()));
+                span.setTag("error.reason", "no_services_found");
+                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.NOT_FOUND);
+                return false;
+            }
+
+            List<Service> externalServices = services.stream()
+                    .filter(s -> !s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+            List<Service> internalServices = services.stream()
+                    .filter(s -> s.getMetadata().getName().endsWith("-int")).collect(Collectors.toList());
+
+            if (externalServices.size() != 1 || internalServices.size() != 1) {
+                LOGGER.error(formatLogMessage(correlationId, "Expected 1 external and 1 internal service, found "
+                        + externalServices.size() + " and " + internalServices.size()));
+                span.setTag("error.reason", "service_count_mismatch");
+                span.setData("external_count", externalServices.size());
+                span.setData("internal_count", internalServices.size());
+                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                return false;
+            }
+
+            Service externalService = externalServices.get(0);
+            Service internalService = internalServices.get(0);
+
+            Integer instanceId = parseInstanceId(externalService);
+            if (instanceId == null) {
+                LOGGER.error(formatLogMessage(correlationId, "Cannot determine instance ID from service"));
+                span.setTag("error.reason", "cannot_parse_instance_id");
+                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                return false;
+            }
+            span.setData("instance_id", instanceId);
+
+            boolean success = true;
+
+            // Clean up services
+            ISpan svcSpan = span.startChild("pool.cleanup_services", "Clean up services");
+            success &= cleanupService(externalService, sessionName, sessionUID, correlationId);
+            success &= cleanupService(internalService, sessionName, sessionUID, correlationId);
+            SentryHelper.finishWithOutcome(svcSpan, success);
+
+            // Clean up deployment
+            ISpan deploySpan = span.startChild("pool.cleanup_deployment", "Clean up deployment");
+            String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, instanceId);
             try {
-                client.kubernetes().configMaps().withName(emailConfigName).edit(cm -> {
-                    cm.setData(Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST, null));
-                    return cm;
-                });
+                client.kubernetes().apps().deployments().withName(deploymentName).edit(d -> TheiaCloudHandlerUtil
+                        .removeOwnerReferenceFromItem(correlationId, sessionName, sessionUID, d));
+                SentryHelper.finishSuccess(deploySpan);
             } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "Failed to clear email config"), e);
+                LOGGER.error(formatLogMessage(correlationId, "Failed to clean up deployment"), e);
+                SentryHelper.finishError(deploySpan, e);
                 success = false;
             }
+
+            // Clear email config
+            if (arguments.isUseKeycloak()) {
+                ISpan emailSpan = span.startChild("pool.clear_email_config", "Clear email config");
+                String emailConfigName = TheiaCloudConfigMapUtil.getEmailConfigName(appDef, instanceId);
+                try {
+                    client.kubernetes().configMaps().withName(emailConfigName).edit(cm -> {
+                        cm.setData(
+                                Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST, null));
+                        return cm;
+                    });
+                    SentryHelper.finishSuccess(emailSpan);
+                } catch (KubernetesClientException e) {
+                    LOGGER.error(formatLogMessage(correlationId, "Failed to clear email config"), e);
+                    SentryHelper.finishError(emailSpan, e);
+                    success = false;
+                }
+            }
+
+            // Delete pod to reset state
+            ISpan podSpan = span.startChild("pool.delete_pod", "Delete pod to reset state");
+            deletePod(deploymentName, correlationId);
+            SentryHelper.finishSuccess(podSpan);
+
+            SentryHelper.finishWithOutcome(span, success);
+            return success;
+
+        } catch (Exception e) {
+            SentryHelper.finishError(span, e);
+            throw e;
         }
-
-        // Delete pod to reset state
-        deletePod(deploymentName, correlationId);
-
-        return success;
     }
 
     // ========== Helper Methods ==========
@@ -840,7 +1147,6 @@ public class PrewarmedResourcePool {
     }
 
     private List<Service> findServicesByLabels(Map<String, String> labels, String correlationId) {
-        // Build label selector string: "key1=value1,key2=value2"
         String labelSelector = labels.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue())
                 .collect(Collectors.joining(","));
         return client.kubernetes().services().inNamespace(client.namespace()).withLabelSelector(labelSelector).list()

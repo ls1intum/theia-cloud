@@ -127,7 +127,7 @@ public class MonitorActivityTracker implements OperatorPlugin {
                 } else {
                     missingIPCount++;
                     LOGGER.error("No ClusterIP found for session " + session.getSpec().getName());
-                    Sentry.captureMessage("No ClusterIP found for session " + session.getSpec().getName());
+                    Sentry.addBreadcrumb("No ClusterIP found for session " + session.getSpec().getName());
                 }
             }
 

@@ -19,9 +19,14 @@ import org.eclipse.theia.cloud.operator.LeaderElectionTheiaCloudOperatorLauncher
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.di.AbstractTheiaCloudOperatorModule;
 
+import io.sentry.Sentry;
+
 public class DefaultTheiaCloudOperatorLauncher extends LeaderElectionTheiaCloudOperatorLauncher {
 
     public static void main(String[] args) throws InterruptedException {
+        Sentry.init(options -> {
+            options.setTag("component", "operator");
+        });
         new DefaultTheiaCloudOperatorLauncher().runMain(args);
     }
 

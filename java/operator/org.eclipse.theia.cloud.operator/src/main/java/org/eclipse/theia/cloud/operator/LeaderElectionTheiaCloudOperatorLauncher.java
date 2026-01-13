@@ -36,6 +36,10 @@ import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElectionConfig
 import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElectionConfigBuilder;
 import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElector;
 import io.fabric8.kubernetes.client.extended.leaderelection.resourcelock.LeaseLock;
+import io.fabric8.kubernetes.client.okhttp.OkHttpClientFactory;
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
+import okhttp3.OkHttpClient;
 
 public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaCloudOperatorLauncher {
 
@@ -64,7 +68,16 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
 
         Config k8sConfig = new ConfigBuilder().build();
 
-        try (KubernetesClient k8sClient = new KubernetesClientBuilder().withConfig(k8sConfig).build()) {
+        try (KubernetesClient k8sClient = new KubernetesClientBuilder()
+                .withConfig(k8sConfig)
+                .withHttpClientFactory(new OkHttpClientFactory() {
+                    @Override
+                    protected void additionalConfig(OkHttpClient.Builder builder) {
+                        builder.addInterceptor(new SentryOkHttpInterceptor());
+                        builder.eventListener(new SentryOkHttpEventListener());
+                    }
+                })
+                .build()) {
             String leaseLockNamespace = k8sClient.getNamespace();
 
             LeaderElectionConfig leaderElectionConfig = new LeaderElectionConfigBuilder()//

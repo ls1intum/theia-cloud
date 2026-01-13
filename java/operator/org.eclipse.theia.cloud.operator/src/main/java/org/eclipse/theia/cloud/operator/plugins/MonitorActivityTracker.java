@@ -76,10 +76,8 @@ public class MonitorActivityTracker implements OperatorPlugin {
     @Inject
     private TheiaCloudOperatorArguments arguments;
 
-    private final OkHttpClient httpClient = new OkHttpClient.Builder()
-            .addInterceptor(new SentryOkHttpInterceptor())
-            .eventListener(new SentryOkHttpEventListener())
-            .build();
+    private final OkHttpClient httpClient = new OkHttpClient.Builder().addInterceptor(new SentryOkHttpInterceptor())
+            .eventListener(new SentryOkHttpEventListener()).build();
 
     @Override
     public void start() {
@@ -110,14 +108,16 @@ public class MonitorActivityTracker implements OperatorPlugin {
                 Optional<String> sessionIP = resourceClient.getClusterIPFromSessionName(session.getSpec().getName());
                 if (sessionIP.isPresent()) {
                     String appDefinitionName = session.getSpec().getAppDefinition();
-                    Optional<AppDefinition> appDefinitionOptional = resourceClient.appDefinitions().get(appDefinitionName);
+                    Optional<AppDefinition> appDefinitionOptional = resourceClient.appDefinitions()
+                            .get(appDefinitionName);
                     if (appDefinitionOptional.isPresent()) {
                         AppDefinition appDefinition = appDefinitionOptional.get();
                         int timeoutAfter = appDefinition.getSpec().getMonitor().getActivityTracker().getTimeoutAfter();
                         int notifyAfter = appDefinition.getSpec().getMonitor().getActivityTracker().getNotifyAfter();
                         int port = appDefinition.getSpec().getMonitor().getPort();
 
-                        boolean success = pingSession(transaction, correlationId, session, sessionIP.get(), port, timeoutAfter, notifyAfter);
+                        boolean success = pingSession(transaction, correlationId, session, sessionIP.get(), port,
+                                timeoutAfter, notifyAfter);
                         if (success) {
                             successCount++;
                         } else {
@@ -144,7 +144,7 @@ public class MonitorActivityTracker implements OperatorPlugin {
         }
     }
 
-    protected boolean pingSession(ITransaction transaction, String correlationId, Session session, String sessionURL, 
+    protected boolean pingSession(ITransaction transaction, String correlationId, Session session, String sessionURL,
             int port, int shutdownAfter, int notifyAfter) {
         String sessionName = session.getSpec().getName();
         ISpan sessionSpan = transaction.startChild("monitor.ping-session", "monitor.session");
@@ -163,7 +163,7 @@ public class MonitorActivityTracker implements OperatorPlugin {
                         .addHeader("Authorization", "Bearer " + session.getSpec().getSessionSecret()).get().build();
                 Response getActivityResponse = httpClient.newCall(getActivityRequest).execute();
                 ResponseBody body = getActivityResponse.body();
-                
+
                 if (getActivityResponse.code() == 200 && body != null) {
                     long lastReportedMilliseconds = Long.valueOf(body.string());
                     session = updateLastActivity(correlationId, session, lastReportedMilliseconds);
@@ -182,13 +182,13 @@ public class MonitorActivityTracker implements OperatorPlugin {
 
             sessionSpan.setData("minutes_since_activity", minutesPassed);
             String minutes = minutesPassed == 1 ? "minute" : "minutes";
-            logInfo(sessionName, "Last reported activity was: " + formatDate(lastActivityDate) + " (" + minutesPassed + " "
-                    + minutes + " ago)");
+            logInfo(sessionName, "Last reported activity was: " + formatDate(lastActivityDate) + " (" + minutesPassed
+                    + " " + minutes + " ago)");
 
             if (minutesPassed < shutdownAfter) {
                 if (minutesPassed >= notifyAfter) {
                     logInfo(sessionName, "Notifying session as timeout of " + notifyAfter + " minutes was reached!");
-                    
+
                     String postPopupURL = getURL(sessionURL, port, POST_POPUP);
                     logInfo(sessionName, "POST " + postPopupURL);
                     try {
@@ -212,9 +212,13 @@ public class MonitorActivityTracker implements OperatorPlugin {
 
             return success;
         } catch (Exception e) {
+            LOGGER.error(
+                    formatLogMessage(correlationId, correlationId, "Exception while pinging session " + sessionName),
+                    e);
             sessionSpan.setStatus(SpanStatus.INTERNAL_ERROR);
             sessionSpan.setThrowable(e);
-            throw e;
+            Sentry.captureException(e);
+            return false;
         } finally {
             sessionSpan.finish();
         }
@@ -239,15 +243,15 @@ public class MonitorActivityTracker implements OperatorPlugin {
         ISpan deleteSpan = parentSpan.startChild("monitor.delete-session", "monitor.cleanup");
         deleteSpan.setData("session_name", sessionName);
         deleteSpan.setData("timeout_minutes", shutdownAfter);
-        
+
         try {
             this.messagingService.sendTimeoutMessage(session,
                     "Timeout of " + shutdownAfter + " minutes of inactivity was reached!");
             logInfo(sessionName, "Deleting session as timeout of " + shutdownAfter + " minutes was reached!");
             resourceClient.sessions().delete(COR_ID_NOACTIVITYPREFIX + correlationId, sessionName);
             deleteSpan.setStatus(SpanStatus.OK);
-            Sentry.captureMessage("Session stopped due to inactivity: " + sessionName + 
-                                 " (timeout: " + shutdownAfter + " minutes)");
+            Sentry.captureMessage(
+                    "Session stopped due to inactivity: " + sessionName + " (timeout: " + shutdownAfter + " minutes)");
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(COR_ID_NOACTIVITYPREFIX, correlationId, "Exception trying to delete session"),
                     e);

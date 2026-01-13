@@ -15,6 +15,8 @@
  ********************************************************************************/
 package org.eclipse.theia.cloud.common.k8s.client;
 
+import org.eclipse.theia.cloud.common.util.CustomResourceUtil;
+
 import java.util.Optional;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
@@ -29,7 +31,6 @@ import io.fabric8.kubernetes.api.model.ServiceList;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressList;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -78,7 +79,7 @@ public interface TheiaCloudClient extends NamespacedKubernetesClient {
     }
 
     default Optional<String> getClusterIPFromSessionName(String sessionName) {
-        try (final KubernetesClient client = new KubernetesClientBuilder().build()) {
+        try (final KubernetesClient client = CustomResourceUtil.createClient()) {
             ServiceList svcList = client.services().inNamespace(namespace()).list();
             for (Service svc : svcList.getItems()) {
                 if (svc.getMetadata().getName().endsWith("-int")) {
@@ -95,7 +96,7 @@ public interface TheiaCloudClient extends NamespacedKubernetesClient {
     }
 
     default Optional<String> getInternalClusterIPFromSessionName(String sessionName) {
-        try (final KubernetesClient client = new KubernetesClientBuilder().build()) {
+        try (final KubernetesClient client = CustomResourceUtil.createClient()) {
             ServiceList svcList = client.services().inNamespace(namespace()).list();
             for (Service svc : svcList.getItems()) {
                 if (!svc.getMetadata().getName().endsWith("-int")) {

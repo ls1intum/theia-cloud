@@ -24,6 +24,10 @@ import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
+import io.fabric8.kubernetes.client.okhttp.OkHttpClientFactory;
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
+import okhttp3.OkHttpClient;
 
 public final class CustomResourceUtil {
 
@@ -35,7 +39,16 @@ public final class CustomResourceUtil {
     }
 
     public static NamespacedKubernetesClient createClient(Config config) {
-        KubernetesClient client = new KubernetesClientBuilder().withConfig(config).build();
+        KubernetesClient client = new KubernetesClientBuilder()
+                .withConfig(config)
+                .withHttpClientFactory(new OkHttpClientFactory() {
+                    @Override
+                    protected void additionalConfig(OkHttpClient.Builder builder) {
+                        builder.addInterceptor(new SentryOkHttpInterceptor());
+                        builder.eventListener(new SentryOkHttpEventListener());
+                    }
+                })
+                .build();
         return client.adapt(NamespacedKubernetesClient.class);
     }
 

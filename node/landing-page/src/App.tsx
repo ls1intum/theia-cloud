@@ -268,13 +268,15 @@ function App(): JSX.Element {
 
     keycloak
       .init({
-        onLoad: 'login-required',
+        onLoad: 'check-sso',
         redirectUri: window.location.href,
         checkLoginIframe: false
       })
       .then((authenticated: boolean) => {
         if (!authenticated) {
-          window.location.reload();
+          keycloak.login({
+            action: 'webauthn-register-passwordless:skip_if_exists'
+          });
         } else {
           const parsedToken = keycloak.idTokenParsed;
           if (parsedToken) {

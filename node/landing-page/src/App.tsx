@@ -471,7 +471,7 @@ function App(): JSX.Element {
             </div>
           )}
           <ErrorComponent message={error} />
-          {!error && (
+          {!error && !loading && (
             <Info
               usesLogin={config.useKeycloak}
               disable={config.disableInfo}

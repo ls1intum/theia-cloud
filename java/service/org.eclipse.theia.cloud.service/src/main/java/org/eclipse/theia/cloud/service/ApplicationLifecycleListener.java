@@ -44,8 +44,6 @@ public class ApplicationLifecycleListener {
 
     private void initializeSentry() {
         Sentry.init(options -> {
-            String dsn = ConfigProvider.getConfig().getOptionalValue("sentry.dsn", String.class).orElse("");
-            options.setDsn(dsn);
             options.setTag("component", "service");
         });
     }

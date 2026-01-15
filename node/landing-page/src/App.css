@@ -331,8 +331,11 @@
 }
 
 .Loading__description {
-  padding-top: 3em;
+  padding-top: 2em;
   color: var(--color-text-primary);
+  font-size: 1.2rem;
+  max-width: 600px;
+  text-align: center;
 }
 
 /* Responsive design for tablets */

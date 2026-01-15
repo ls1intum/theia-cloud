@@ -268,14 +268,17 @@ function App(): JSX.Element {
 
     keycloak
       .init({
-        onLoad: 'login-required',
-        redirectUri: window.location.href,
+        redirectUri: window.location.origin + window.location.pathname,
         checkLoginIframe: false
       })
       .then((authenticated: boolean) => {
         if (!authenticated) {
-          window.location.reload();
+          keycloak.login({
+            redirectUri: window.location.origin + window.location.pathname,
+            action: 'webauthn-register-passwordless:skip_if_exists'
+          });
         } else {
+          // If we are already authenticated (e.g. session existed but UI wasn't updated), update state
           const parsedToken = keycloak.idTokenParsed;
           if (parsedToken) {
             const userMail = parsedToken.email;
@@ -468,7 +471,7 @@ function App(): JSX.Element {
             </div>
           )}
           <ErrorComponent message={error} />
-          {!error && (
+          {!error && !loading && (
             <Info
               usesLogin={config.useKeycloak}
               disable={config.disableInfo}

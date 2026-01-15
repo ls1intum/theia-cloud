@@ -33,8 +33,9 @@ ENV KEYCLOAK_CLIENTSECRET publicbutoauth2proxywantsasecret
 ENV KEYCLOAK_ADMIN_GROUP theia-cloud/admin
 
 # Use SERVICE_AUTH_TOKEN if set, otherwise fall back to APPID for backwards compatibility
-ENV SENTRY_PROPERTIES_FILE=sentry.properties
+ENV SENTRY_PROPERTIES_FILE=/service/sentry.properties
 ENTRYPOINT java -javaagent:sentry-opentelemetry-agent-8.29.0.jar \
+    -Dsentry.properties.file=${SENTRY_PROPERTIES_FILE} \
     -Dtheia.cloud.service.auth.token=${SERVICE_AUTH_TOKEN:-${APPID}} \
     -Dquarkus.http.port=${SERVICE_PORT} \
     -Dtheia.cloud.auth.admin.group=${KEYCLOAK_ADMIN_GROUP} \

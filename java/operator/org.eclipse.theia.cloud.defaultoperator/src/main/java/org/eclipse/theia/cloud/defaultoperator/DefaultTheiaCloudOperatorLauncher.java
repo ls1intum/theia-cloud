@@ -24,13 +24,6 @@ import io.sentry.Sentry;
 public class DefaultTheiaCloudOperatorLauncher extends LeaderElectionTheiaCloudOperatorLauncher {
 
     public static void main(String[] args) throws InterruptedException {
-        Sentry.init(options -> {
-            options.setTag("component", "operator");
-            String sentryDsn = System.getenv("SENTRY_DSN");
-            if (sentryDsn != null) {
-                options.setDsn(System.getenv("SENTRY_DSN"));
-            }
-        });
         new DefaultTheiaCloudOperatorLauncher().runMain(args);
     }
 

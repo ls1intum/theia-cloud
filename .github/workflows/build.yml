@@ -41,6 +41,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/ls1intum/theia/operator
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
@@ -79,6 +83,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/ls1intum/theia/service
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6

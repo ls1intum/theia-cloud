@@ -32,4 +32,3 @@ ENTRYPOINT java -javaagent:sentry-opentelemetry-agent-8.29.0.jar \
     -Dsentry.properties.file=${SENTRY_PROPERTIES_FILE} \
     -Dlog4j2.configurationFile=/log-config/log4j2.xml \
     -jar ./defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar
-CMD [ "" ]

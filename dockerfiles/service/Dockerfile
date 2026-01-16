@@ -21,20 +21,21 @@ RUN curl -fsSL -o sentry-agent.zip https://github.com/getsentry/sentry-java/rele
     unzip -j sentry-agent.zip -d . && \
     rm sentry-agent.zip
 
-ENV SERVICE_PORT 8081
+ENV SERVICE_PORT=8081
 
-ENV APPID default-app-id
+ENV APPID=default-app-id
 
-ENV KEYCLOAK_ENABLE true
+ENV KEYCLOAK_ENABLE=true
 # Keycloak config
-ENV KEYCLOAK_SERVERURL https://keycloak.url/auth/realms/TheiaCloud
-ENV KEYCLOAK_CLIENTID theia-cloud
-ENV KEYCLOAK_CLIENTSECRET publicbutoauth2proxywantsasecret
-ENV KEYCLOAK_ADMIN_GROUP theia-cloud/admin
+ENV KEYCLOAK_SERVERURL=https://keycloak.url/auth/realms/TheiaCloud
+ENV KEYCLOAK_CLIENTID=theia-cloud
+ENV KEYCLOAK_CLIENTSECRET=publicbutoauth2proxywantsasecret
+ENV KEYCLOAK_ADMIN_GROUP=theia-cloud/admin
 
 # Use SERVICE_AUTH_TOKEN if set, otherwise fall back to APPID for backwards compatibility
-ENV SENTRY_PROPERTIES_FILE=sentry.properties
+ENV SENTRY_PROPERTIES_FILE=/service/sentry.properties
 ENTRYPOINT java -javaagent:sentry-opentelemetry-agent-8.29.0.jar \
+    -Dsentry.properties.file=${SENTRY_PROPERTIES_FILE} \
     -Dtheia.cloud.service.auth.token=${SERVICE_AUTH_TOKEN:-${APPID}} \
     -Dquarkus.http.port=${SERVICE_PORT} \
     -Dtheia.cloud.auth.admin.group=${KEYCLOAK_ADMIN_GROUP} \

@@ -26,7 +26,8 @@ RUN curl -fsSL -o sentry-agent.zip https://github.com/getsentry/sentry-java/rele
     unzip -j sentry-agent.zip -d . && \
     rm sentry-agent.zip
 
-ENV SENTRY_PROPERTIES_FILE=sentry.properties
 # to get more debug information from the kubernetes client itself, add -Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG below
-ENTRYPOINT [ "java", "-javaagent:sentry-opentelemetry-agent-8.29.0.jar", "-Dlog4j2.configurationFile=/log-config/log4j2.xml", "-jar", "./defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar" ]
-CMD [ "" ]
+ENTRYPOINT ["java", "-javaagent:sentry-opentelemetry-agent-8.29.0.jar", \
+    "-Dsentry.properties.file=/operator/sentry.properties", \
+    "-Dlog4j2.configurationFile=/log-config/log4j2.xml", \
+    "-jar", "./defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar"]

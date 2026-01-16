@@ -31,12 +31,17 @@ import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 
+import io.sentry.Sentry;
+
 @ApplicationScoped
 public class ApplicationLifecycleListener {
     protected Logger logger;
 
     protected void onStart(@Observes StartupEvent event) {
         logger = Logger.getLogger(getClass());
+        Sentry.configureScope(scope -> {
+            scope.setTag("component", "service");
+        });
         logConfiguration();
     }
 

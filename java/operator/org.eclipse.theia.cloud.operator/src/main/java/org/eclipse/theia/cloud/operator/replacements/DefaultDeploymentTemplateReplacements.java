@@ -172,7 +172,9 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         }
 
         // Handle data bridge port and strategy
-        boolean dataBridgeEnabled = DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec());
+        // Data bridge is only enabled for eager sessions (session.isEmpty()).
+        // For lazy sessions, environment variables are set directly on the session resource.
+        boolean dataBridgeEnabled = DataBridgeUtil.isDataBridgeEnabled(appDefinition.getSpec()) && session.isEmpty();
         if (!dataBridgeEnabled) {
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_CONTAINER_PORT, "");
             environmentVariables.put(TheiaCloudHandlerUtil.PLACEHOLDER_DATA_BRIDGE_ENV_PORT, "");

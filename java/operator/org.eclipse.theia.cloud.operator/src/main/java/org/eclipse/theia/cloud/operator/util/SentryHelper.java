@@ -17,15 +17,11 @@ import io.sentry.Sentry;
 import io.sentry.SpanStatus;
 
 /**
- * Helper class for consistent Sentry instrumentation across the operator codebase.
- * Uses span tags for aggregation - avoiding direct metrics API calls.
- * 
- * Tag conventions for aggregation queries:
- * - session.strategy: eager | lazy | lazy-fallback
- * - session.outcome: success | error | no_capacity
- * - resource.type: service | deployment | configmap | ingress
- * - resource.operation: create | delete | update | reserve | release
- * - pool.outcome: success | no_capacity | error
+ * Helper class for consistent Sentry instrumentation across the operator codebase. Uses span tags for aggregation -
+ * avoiding direct metrics API calls. Tag conventions for aggregation queries: - session.strategy: eager | lazy |
+ * lazy-fallback - session.outcome: success | error | no_capacity - resource.type: service | deployment | configmap |
+ * ingress - resource.operation: create | delete | update | reserve | release - pool.outcome: success | no_capacity |
+ * error
  */
 public final class SentryHelper {
 
@@ -37,8 +33,8 @@ public final class SentryHelper {
     /**
      * Starts a transaction for session handling with standard tags.
      */
-    public static ITransaction startSessionTransaction(String action, String sessionName, String appDef,
-            String user, String correlationId) {
+    public static ITransaction startSessionTransaction(String action, String sessionName, String appDef, String user,
+            String correlationId) {
         ITransaction tx = Sentry.startTransaction("session." + action, "session");
         tx.setTag("session.name", sessionName);
         tx.setTag("app_definition", appDef);
@@ -155,7 +151,8 @@ public final class SentryHelper {
     public static boolean tracedBoolean(String operation, String description, Supplier<Boolean> action) {
         ISpan span = startSpan(operation, description);
         try {
-            boolean result = action.get();
+            Boolean resultObj = action.get();
+            boolean result = resultObj != null ? resultObj.booleanValue() : false;
             span.setTag("outcome", result ? "success" : "failure");
             span.setStatus(result ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return result;
@@ -290,25 +287,25 @@ public final class SentryHelper {
      * Captures an error with operation context.
      */
     public static void captureError(Throwable error, String operation, String correlationId) {
-        Sentry.configureScope(scope -> {
+        Sentry.withScope(scope -> {
             scope.setTag("operation", operation);
             scope.setTag("correlation_id", correlationId);
+            Sentry.captureException(error);
         });
-        Sentry.captureException(error);
     }
 
     /**
      * Captures a K8s resource error with full context.
      */
-    public static void captureK8sError(Throwable error, String resourceType, String resourceName,
-            String operation, String correlationId) {
-        Sentry.configureScope(scope -> {
+    public static void captureK8sError(Throwable error, String resourceType, String resourceName, String operation,
+            String correlationId) {
+        Sentry.withScope(scope -> {
             scope.setTag("resource.type", resourceType);
             scope.setTag("resource.name", resourceName);
             scope.setTag("operation", operation);
             scope.setTag("correlation_id", correlationId);
+            Sentry.captureException(error);
         });
-        Sentry.captureException(error);
     }
 
     /**

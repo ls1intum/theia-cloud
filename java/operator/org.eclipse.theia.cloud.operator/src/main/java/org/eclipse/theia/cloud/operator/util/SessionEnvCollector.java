@@ -2,6 +2,7 @@ package org.eclipse.theia.cloud.operator.util;
 
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -101,12 +102,21 @@ public class SessionEnvCollector {
             Map<String, String> data = secret.getData();
             if (data != null && !data.isEmpty()) {
                 // Secret data is base64 encoded
+                int successCount = 0;
                 for (Map.Entry<String, String> entry : data.entrySet()) {
-                    String decodedValue = new String(Base64.getDecoder().decode(entry.getValue()));
-                    result.put(entry.getKey(), decodedValue);
+                    try {
+                        String decodedValue = new String(Base64.getDecoder().decode(entry.getValue()),
+                                StandardCharsets.UTF_8);
+                        result.put(entry.getKey(), decodedValue);
+                        successCount++;
+                    } catch (IllegalArgumentException e) {
+                        SentryHelper.captureError(e, secretName, correlationId);
+                        LOGGER.warn(formatLogMessage(correlationId, "Failed to decode Base64 value for key '"
+                                + entry.getKey() + "' in Secret: " + secretName), e);
+                    }
                 }
                 LOGGER.debug(formatLogMessage(correlationId,
-                        "Resolved " + data.size() + " env vars from Secret: " + secretName));
+                        "Resolved " + successCount + " env vars from Secret: " + secretName));
             }
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Failed to resolve Secret: " + secretName), e);

@@ -11,6 +11,7 @@ package org.eclipse.theia.cloud.operator.util;
 
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
@@ -23,8 +24,8 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.Resource;
 
 /**
- * Centralized manager for Kubernetes owner reference operations.
- * Consolidates ownership logic from OwnerReferenceChecker and TheiaCloudHandlerUtil.
+ * Centralized manager for Kubernetes owner reference operations. Consolidates ownership logic from
+ * OwnerReferenceChecker and TheiaCloudHandlerUtil.
  */
 public final class OwnershipManager {
 
@@ -115,8 +116,7 @@ public final class OwnershipManager {
         if (refs == null || refs.isEmpty()) {
             return false;
         }
-        return refs.stream()
-                .anyMatch(ref -> ownerUID.equals(ref.getUid()) && ownerName.equals(ref.getName()));
+        return refs.stream().anyMatch(ref -> ownerUID.equals(ref.getUid()) && ownerName.equals(ref.getName()));
     }
 
     /**
@@ -164,22 +164,37 @@ public final class OwnershipManager {
      * @return the same resource for chaining
      */
     public static <T extends HasMetadata> T addOwner(T resource, OwnerContext owner, String correlationId) {
+        if (resource.getMetadata() == null) {
+            LOGGER.warn(formatLogMessage(correlationId,
+                    "Cannot add owner " + owner.getName() + ": resource metadata is null"));
+            return resource;
+        }
         LOGGER.info(formatLogMessage(correlationId,
                 "Adding owner " + owner.getName() + " to " + resource.getMetadata().getName()));
+        if (resource.getMetadata().getOwnerReferences() == null) {
+            resource.getMetadata().setOwnerReferences(new ArrayList<>());
+        }
         resource.getMetadata().getOwnerReferences().add(owner.toOwnerReference());
         return resource;
     }
 
     /**
-     * Removes an owner reference from a resource (in-memory mutation).
-     * Does nothing if the owner is not present.
+     * Removes an owner reference from a resource (in-memory mutation). Does nothing if the owner is not present.
      * 
      * @return the same resource for chaining
      */
     public static <T extends HasMetadata> T removeOwner(T resource, String ownerName, String ownerUID,
             String correlationId) {
+        if (resource.getMetadata() == null) {
+            LOGGER.warn(formatLogMessage(correlationId,
+                    "Cannot remove owner " + ownerName + ": resource metadata is null"));
+            return resource;
+        }
         LOGGER.info(formatLogMessage(correlationId,
                 "Removing owner " + ownerName + " from " + resource.getMetadata().getName()));
+        if (resource.getMetadata().getOwnerReferences() == null) {
+            return resource;
+        }
         resource.getMetadata().getOwnerReferences()
                 .removeIf(ref -> ownerName.equals(ref.getName()) && ownerUID.equals(ref.getUid()));
         return resource;
@@ -240,4 +255,3 @@ public final class OwnershipManager {
         }
     }
 }
-

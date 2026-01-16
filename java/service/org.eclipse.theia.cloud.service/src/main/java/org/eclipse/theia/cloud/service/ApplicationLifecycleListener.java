@@ -27,10 +27,11 @@ import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.jboss.logging.Logger;
 
 import io.quarkus.runtime.StartupEvent;
-import io.sentry.Sentry;
 import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+
+import io.sentry.Sentry;
 
 @ApplicationScoped
 public class ApplicationLifecycleListener {
@@ -38,14 +39,10 @@ public class ApplicationLifecycleListener {
 
     protected void onStart(@Observes StartupEvent event) {
         logger = Logger.getLogger(getClass());
-        initializeSentry();
-        logConfiguration();
-    }
-
-    private void initializeSentry() {
-        Sentry.init(options -> {
-            options.setTag("component", "service");
+        Sentry.configureScope(scope -> {
+            scope.setTag("component", "service");
         });
+        logConfiguration();
     }
 
     private void logConfiguration() {

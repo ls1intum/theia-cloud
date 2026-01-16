@@ -33,12 +33,15 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
+import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.JavaUtil;
 import org.eclipse.theia.cloud.common.util.LabelsUtil;
+import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.LangServerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
@@ -267,6 +270,36 @@ public class EagerSessionHandler implements SessionHandler {
                     formatLogMessage(correlationId, "Error while editing session " + session.getMetadata().getName()),
                     e);
             return false;
+        }
+
+        /* External Language Server Support */
+        if (appDefinition.get().getSpec().getOptions() != null
+                && appDefinition.get().getSpec().getOptions().containsKey("langserver-image")) {
+            String lsImage = appDefinition.get().getSpec().getOptions().get("langserver-image");
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Found langserver-image option: " + lsImage));
+
+            // Get storage name from session workspace for volume mounting
+            Optional<String> storageName = getStorageName(session, correlationId);
+            
+            LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get());
+            LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition.get(), lsImage, storageName);
+
+            /* Update Theia Deployment with LS env vars */
+            try {
+                client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
+                    LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition.get());
+                    return deployment;
+                });
+                LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars"));
+            } catch (KubernetesClientException e) {
+                LOGGER.error(formatLogMessage(correlationId, "[LSSERVICE] Error while updating Theia deployment with LS env vars"), e);
+                return false;
+            }
+        }
+        else {
+            LOGGER.info(formatLogMessage(correlationId, "No External Language Server Support configured for app definition " + appDefinitionID));
         }
 
         return true;
@@ -561,6 +594,9 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
+        // Cleanup LS resources
+        LangServerUtil.deleteLangServerResources(client.kubernetes(), sessionResourceName, correlationId);
+
         return true;
     }
 
@@ -580,4 +616,30 @@ public class EagerSessionHandler implements SessionHandler {
             return ingressToUpdate;
         });
     }
+
+    protected Optional<String> getStorageName(Session session, String correlationId) {
+        if (session.getSpec().isEphemeral()) {
+            return Optional.empty();
+        }
+        Optional<Workspace> workspace = client.workspaces().get(session.getSpec().getWorkspace());
+        if (!workspace.isPresent()) {
+            LOGGER.info(formatLogMessage(correlationId, "No workspace with name " + session.getSpec().getWorkspace()
+                    + " found for session " + session.getSpec().getName()));
+            return Optional.empty();
+        }
+        if (!session.getSpec().getUser().equals(workspace.get().getSpec().getUser())) {
+            LOGGER.error(formatLogMessage(correlationId, "Workspace is owned by " + workspace.get().getSpec().getUser()
+                    + ", but requesting user is " + session.getSpec().getUser()));
+            return Optional.empty();
+        }
+
+        String storageName = WorkspaceUtil.getStorageName(workspace.get());
+        if (!client.persistentVolumeClaimsClient().has(storageName)) {
+            LOGGER.error(formatLogMessage(correlationId, "Workspace " + workspace.get().getSpec().getName()
+                    + " has no corresponding PVC " + storageName));
+            return Optional.empty();
+        }
+        return Optional.of(storageName);
+    }
+
 }

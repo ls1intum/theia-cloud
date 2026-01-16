@@ -414,7 +414,7 @@ function App(): JSX.Element {
   };
 
   const needsLogin = config.useKeycloak && !token;
-  const logoFileExtension = config.logoFileExtension ?? 'svg';
+  const logoFileExtension = config.logoFileExtension ?? 'png';
 
   // Render different pages based on currentPage state
   if (currentPage === 'imprint') {

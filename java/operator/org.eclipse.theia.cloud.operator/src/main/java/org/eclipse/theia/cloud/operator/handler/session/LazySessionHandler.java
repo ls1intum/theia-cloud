@@ -50,6 +50,7 @@ import org.eclipse.theia.cloud.operator.ingress.IngressPathProvider;
 import org.eclipse.theia.cloud.operator.replacements.DeploymentTemplateReplacements;
 import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.LangServerUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudIngressUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudK8sUtil;
@@ -296,6 +297,21 @@ public class LazySessionHandler implements SessionHandler {
             return false;
         }
 
+        /* External Language Server Support */
+        if (appDefinition.getSpec().getOptions() != null
+                && appDefinition.getSpec().getOptions().containsKey("langserver-image")) {
+            String lsImage = appDefinition.getSpec().getOptions().get("langserver-image");
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Found langserver-image option: " + lsImage));
+
+            LangServerUtil.createAndApplyLSService(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition);
+            LangServerUtil.createAndApplyLSDeployment(client.kubernetes(), client.namespace(), correlationId, sessionResourceName,
+                    sessionResourceUID, appDefinition, lsImage, storageName);
+        }
+        else {
+            LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] No External Language Server Support configured for app definition " + appDefinitionID));
+        }
+
         client.sessions().updateStatus(correlationId, session, s -> {
             s.setOperatorStatus(OperatorStatus.HANDLED);
             s.setLastActivity(Instant.now().toEpochMilli());
@@ -463,8 +479,9 @@ public class LazySessionHandler implements SessionHandler {
                 configMap -> {
                     String host = arguments.getInstancesHost() + ingressPathProvider.getPath(appDefinition, session);
                     int port = appDefinition.getSpec().getPort();
+                    String secret = session.getSpec().getSessionSecret();
                     AddedHandlerUtil.updateProxyConfigMap(client.kubernetes(), client.namespace(), configMap, host,
-                            port);
+                            port, secret);
                 });
     }
 
@@ -506,6 +523,14 @@ public class LazySessionHandler implements SessionHandler {
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {
                         AddedHandlerUtil.addImagePullSecret(deployment, appDefinition.getSpec().getPullSecret());
+                    }
+
+                    /* External Language Server Support - Inject Env Vars */
+                    if (appDefinition.getSpec().getOptions() != null
+                            && appDefinition.getSpec().getOptions().containsKey("langserver-image")) {
+                        String lsImage = appDefinition.getSpec().getOptions().get("langserver-image");
+                        LangServerUtil.updateTheiaDeploymentWithLangServerEnvVars(deployment, sessionResourceName, lsImage, appDefinition);
+                        LOGGER.info(formatLogMessage(correlationId, "[LSSERVICE] Updated Theia deployment with LS env vars (during creation)"));
                     }
                 });
     }
@@ -638,6 +663,13 @@ public class LazySessionHandler implements SessionHandler {
 
         LOGGER.info(formatLogMessage(correlationId,
                 "Successfully cleaned up ingress rules for session " + sessionSpec.getName()));
+
+        /* External Language Server Support */
+        if (optionalAppDefinition.get().getSpec().getOptions() != null
+                && optionalAppDefinition.get().getSpec().getOptions().containsKey("langserver-image")) {
+            LangServerUtil.deleteLangServerResources(client.kubernetes(), session.getMetadata().getName(), correlationId);
+        }
+
         return true;
     }
 }

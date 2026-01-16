@@ -58,7 +58,7 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
         LOGGER.info(formatLogMessage(COR_ID_INIT, "Theia Cloud Leader Election Loop Ended"));
     }
 
-    protected void runLeaderElection(TheiaCloudOperatorArguments args) {
+    protected void runLeaderElection(TheiaCloudOperatorArguments args) throws InterruptedException {
         final String lockIdentity = UUID.randomUUID().toString();
         LOGGER.info(formatLogMessage(COR_ID_INIT, "Own lock identity is " + lockIdentity));
 
@@ -102,6 +102,10 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
                     .build();
             LeaderElector leaderElector = k8sClient.leaderElector().withConfig(leaderElectionConfig).build();
             leaderElector.run();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Interrupted during leader election"), ie);
+            throw ie;
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(COR_ID_INIT, "Error during leader election"), e);
             throw new RuntimeException("Failed to start leader election", e);

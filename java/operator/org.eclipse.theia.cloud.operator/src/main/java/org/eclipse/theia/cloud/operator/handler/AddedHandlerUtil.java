@@ -54,11 +54,6 @@ import org.eclipse.theia.cloud.common.util.LogMessageUtil;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapEnvSource;
-import io.fabric8.kubernetes.api.model.ConfigMapVolumeSource;
-import io.fabric8.kubernetes.api.model.ObjectMeta;
-import io.fabric8.kubernetes.api.model.OwnerReference;
-import io.fabric8.kubernetes.api.model.Volume;
-import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvFromSource;
 import io.fabric8.kubernetes.api.model.EnvVar;
@@ -68,9 +63,7 @@ import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.SecretEnvSource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
-import org.eclipse.theia.cloud.common.util.NamingUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
-import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
 
 public final class AddedHandlerUtil {
 
@@ -258,18 +251,13 @@ public final class AddedHandlerUtil {
     }
 
     /**
-     * Configure remote build cache by setting environment variables.
-     * Blueprints can use these variables to configure their specific build tools
-     * (e.g., Gradle, Maven, npm, etc.) through their own initialization scripts.
-     *
-     * Environment variables set:
-     * - REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle)
-     * - REMOTE_CACHE_URL: The cache server URL (only if enabled)
-     * - REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
+     * Configure remote build cache by setting environment variables. Blueprints can use these variables to configure
+     * their specific build tools (e.g., Gradle, Maven, npm, etc.) through their own initialization scripts. Environment
+     * variables set: - REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle) - REMOTE_CACHE_URL: The cache server
+     * URL (only if enabled) - REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
      */
-    public static void configureRemoteCaching(String correlationId, Deployment deployment,
-                                              AppDefinition appDefinition,
-                                              TheiaCloudOperatorArguments arguments) {
+    public static void configureRemoteCaching(String correlationId, Deployment deployment, AppDefinition appDefinition,
+            TheiaCloudOperatorArguments arguments) {
         // Find the theia container
         Optional<Integer> maybeIdx = findContainerIdxInDeployment(deployment, appDefinition.getSpec().getName());
         if (maybeIdx.isEmpty()) {
@@ -286,9 +274,7 @@ public final class AddedHandlerUtil {
         }
 
         // Determine if caching should be enabled
-        boolean cachingEnabled = arguments != null
-                && arguments.isEnableCaching()
-                && arguments.getCacheUrl() != null
+        boolean cachingEnabled = arguments != null && arguments.isEnableCaching() && arguments.getCacheUrl() != null
                 && !arguments.getCacheUrl().trim().isEmpty();
 
         // Always set the ENABLED variable for explicit control
@@ -310,8 +296,7 @@ public final class AddedHandlerUtil {
             cachePushEnv.setValue("true");
             container.getEnv().add(cachePushEnv);
 
-            LOGGER.info(formatLogMessage(correlationId,
-                    "Remote build cache ENABLED. URL: " + arguments.getCacheUrl()));
+            LOGGER.info(formatLogMessage(correlationId, "Remote build cache ENABLED. URL: " + arguments.getCacheUrl()));
         } else {
             LOGGER.info(formatLogMessage(correlationId, "Remote build cache DISABLED"));
         }

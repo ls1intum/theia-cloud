@@ -500,8 +500,11 @@ public class LazySessionHandler implements SessionHandler {
                             appDefinition.getSpec().getUplinkLimit(), correlationId);
                     AddedHandlerUtil.removeEmptyResources(deployment);
 
-                    AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
-                            appDefinition);
+            AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
+                appDefinition);
+
+            // If caching is enabled, configure remote build cache via environment variables
+            AddedHandlerUtil.configureRemoteCaching(correlationId, deployment, appDefinition, arguments);
 
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {

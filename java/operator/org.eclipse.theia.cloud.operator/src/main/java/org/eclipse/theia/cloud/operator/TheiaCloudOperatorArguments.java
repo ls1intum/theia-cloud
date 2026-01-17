@@ -123,12 +123,11 @@ public class TheiaCloudOperatorArguments {
     private String oAuth2ProxyVersion;
 
     @Option(names = {
-        "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false)
+            "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false)
     private boolean enableCaching = true;
 
     @Option(names = {
-        "--cacheUrl" }, description = "The URL of the remote cache server.", required = false, defaultValue = "https://theia-shared-cache:5071"
-    )
+            "--cacheUrl" }, description = "The URL of the remote cache server.", required = false, defaultValue = "http://theia-cloud-combined-cache:8080/cache/")
     private String cacheUrl;
 
     public boolean isUseKeycloak() {
@@ -393,7 +392,8 @@ public class TheiaCloudOperatorArguments {
                 + ", keycloakClientId=" + keycloakClientId + ", leaderLeaseDuration=" + leaderLeaseDuration
                 + ", leaderRenewDeadline=" + leaderRenewDeadline + ", leaderRetryPeriod=" + leaderRetryPeriod
                 + ", maxWatchIdleTime=" + maxWatchIdleTime + ", continueOnException=" + continueOnException
-                + ", oAuth2ProxyVersion=" + oAuth2ProxyVersion + ", enableCaching=" + enableCaching + ", cacheUrl=" + cacheUrl + "]";
+                + ", oAuth2ProxyVersion=" + oAuth2ProxyVersion + ", enableCaching=" + enableCaching + ", cacheUrl="
+                + cacheUrl + "]";
     }
 
 }

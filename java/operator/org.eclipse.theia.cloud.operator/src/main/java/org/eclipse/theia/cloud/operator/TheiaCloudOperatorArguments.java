@@ -124,10 +124,9 @@ public class TheiaCloudOperatorArguments {
 
     @Option(names = {
             "--enableCaching" }, description = "Whether to enable caching of Theia application containers.", required = false)
-    private boolean enableCaching = true;
+    private boolean enableCaching = false;
 
-    @Option(names = {
-            "--cacheUrl" }, description = "The URL of the remote cache server.", required = false, defaultValue = "http://theia-cloud-combined-cache:8080/cache/")
+    @Option(names = { "--cacheUrl" }, description = "The URL of the remote cache server.", required = false)
     private String cacheUrl;
 
     public boolean isUseKeycloak() {

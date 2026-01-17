@@ -258,21 +258,22 @@ public final class AddedHandlerUtil {
     }
 
     /**
-     * Configure Gradle remote build cache by setting environment variables.
-     * The Gradle init script baked into the image will pick these up automatically.
+     * Configure remote build cache by setting environment variables.
+     * Blueprints can use these variables to configure their specific build tools
+     * (e.g., Gradle, Maven, npm, etc.) through their own initialization scripts.
      *
      * Environment variables set:
-     * - GRADLE_REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle)
-     * - GRADLE_REMOTE_CACHE_URL: The cache server URL (only if enabled)
-     * - GRADLE_REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
+     * - REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle)
+     * - REMOTE_CACHE_URL: The cache server URL (only if enabled)
+     * - REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
      */
-    public static void configureGradleCaching(String correlationId, Deployment deployment,
+    public static void configureRemoteCaching(String correlationId, Deployment deployment,
                                               AppDefinition appDefinition,
                                               TheiaCloudOperatorArguments arguments) {
         // Find the theia container
         Optional<Integer> maybeIdx = findContainerIdxInDeployment(deployment, appDefinition.getSpec().getName());
         if (maybeIdx.isEmpty()) {
-            LOGGER.warn(formatLogMessage(correlationId, "Could not find theia container to configure Gradle caching"));
+            LOGGER.warn(formatLogMessage(correlationId, "Could not find theia container to configure remote caching"));
             return;
         }
 
@@ -292,27 +293,27 @@ public final class AddedHandlerUtil {
 
         // Always set the ENABLED variable for explicit control
         EnvVar cacheEnabledEnv = new EnvVar();
-        cacheEnabledEnv.setName("GRADLE_REMOTE_CACHE_ENABLED");
+        cacheEnabledEnv.setName("REMOTE_CACHE_ENABLED");
         cacheEnabledEnv.setValue(String.valueOf(cachingEnabled));
         container.getEnv().add(cacheEnabledEnv);
 
         if (cachingEnabled) {
             // Set cache URL
             EnvVar cacheUrlEnv = new EnvVar();
-            cacheUrlEnv.setName("GRADLE_REMOTE_CACHE_URL");
+            cacheUrlEnv.setName("REMOTE_CACHE_URL");
             cacheUrlEnv.setValue(arguments.getCacheUrl().trim());
             container.getEnv().add(cacheUrlEnv);
 
             // Set push permission (default: true, could be made configurable)
             EnvVar cachePushEnv = new EnvVar();
-            cachePushEnv.setName("GRADLE_REMOTE_CACHE_PUSH");
+            cachePushEnv.setName("REMOTE_CACHE_PUSH");
             cachePushEnv.setValue("true");
             container.getEnv().add(cachePushEnv);
 
             LOGGER.info(formatLogMessage(correlationId,
-                    "Gradle remote cache ENABLED. URL: " + arguments.getCacheUrl()));
+                    "Remote build cache ENABLED. URL: " + arguments.getCacheUrl()));
         } else {
-            LOGGER.info(formatLogMessage(correlationId, "Gradle remote cache DISABLED"));
+            LOGGER.info(formatLogMessage(correlationId, "Remote build cache DISABLED"));
         }
     }
 

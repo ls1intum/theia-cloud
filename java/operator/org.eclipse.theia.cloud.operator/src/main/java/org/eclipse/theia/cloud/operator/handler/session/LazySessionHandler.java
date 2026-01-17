@@ -472,8 +472,8 @@ public class LazySessionHandler implements SessionHandler {
             AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
                 appDefinition);
 
-            // If operator caching is enabled and a cache URL is configured, add per-session gradle properties
-            AddedHandlerUtil.configureGradleCaching(correlationId, deployment, appDefinition, arguments);
+            // If caching is enabled, configure remote build cache via environment variables
+            AddedHandlerUtil.configureRemoteCaching(correlationId, deployment, appDefinition, arguments);
 
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {

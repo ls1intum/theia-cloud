@@ -162,15 +162,14 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
-        // If caching is enabled, ensure per-session gradle.properties is created and mounted into the deployment
+        // If caching is enabled, configure remote build cache via environment variables
         try {
-
             client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
-                AddedHandlerUtil.configureGradleCaching(correlationId, deployment, appDefinition.get(), arguments);
+                AddedHandlerUtil.configureRemoteCaching(correlationId, deployment, appDefinition.get(), arguments);
                 return deployment;
             });
         } catch (KubernetesClientException e) {
-            LOGGER.warn(formatLogMessage(correlationId, "Could not add gradle init config to deployment " + deploymentName), e);
+            LOGGER.warn(formatLogMessage(correlationId, "Could not configure remote caching for deployment " + deploymentName), e);
             // non-fatal: continue
         }
 

@@ -250,15 +250,9 @@ public final class AddedHandlerUtil {
         imagePullSecrets.add(new LocalObjectReference(secret));
     }
 
-    /**
-     * Configure remote build cache by setting environment variables. Blueprints can use these variables to configure
-     * their specific build tools (e.g., Gradle, Maven, npm, etc.) through their own initialization scripts. Environment
-     * variables set: - REMOTE_CACHE_ENABLED: "true" or "false" (explicit toggle) - REMOTE_CACHE_URL: The cache server
-     * URL (only if enabled) - REMOTE_CACHE_PUSH: "true" or "false" (only if enabled)
-     */
     public static void configureRemoteCaching(String correlationId, Deployment deployment, AppDefinition appDefinition,
             TheiaCloudOperatorArguments arguments) {
-        // Find the theia container
+
         Optional<Integer> maybeIdx = findContainerIdxInDeployment(deployment, appDefinition.getSpec().getName());
         if (maybeIdx.isEmpty()) {
             LOGGER.warn(formatLogMessage(correlationId, "Could not find theia container to configure remote caching"));
@@ -268,12 +262,10 @@ public final class AddedHandlerUtil {
         int idx = maybeIdx.get();
         Container container = deployment.getSpec().getTemplate().getSpec().getContainers().get(idx);
 
-        // Initialize env list if null
         if (container.getEnv() == null) {
             container.setEnv(new ArrayList<>());
         }
 
-        // Determine if caching should be enabled
         boolean cachingEnabled = arguments != null && arguments.isEnableCaching() && arguments.getCacheUrl() != null
                 && !arguments.getCacheUrl().trim().isEmpty();
 
@@ -290,7 +282,7 @@ public final class AddedHandlerUtil {
             cacheUrlEnv.setValue(arguments.getCacheUrl().trim());
             container.getEnv().add(cacheUrlEnv);
 
-            // Set push permission (default: true, could be made configurable)
+            // Set push permission
             EnvVar cachePushEnv = new EnvVar();
             cachePushEnv.setName("REMOTE_CACHE_PUSH");
             cachePushEnv.setValue("true");

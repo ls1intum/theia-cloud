@@ -127,18 +127,28 @@ public class IngressManager {
             int instance,
             String correlationId) {
 
-        String host = arguments.getInstancesHost();
+        String instancesHost = arguments.getInstancesHost();
         String path = pathProvider.getPath(appDefinition, instance);
         int port = appDefinition.getSpec().getPort();
+
+        // Include hostname prefixes (e.g. *.webview.) for eager sessions too
+        List<String> hosts = new ArrayList<>();
+        hosts.add(instancesHost);
+        List<String> prefixes = appDefinition.getSpec().getIngressHostnamePrefixes();
+        if (prefixes != null) {
+            for (String prefix : prefixes) {
+                hosts.add(prefix + instancesHost);
+            }
+        }
 
         addRule(ingress, IngressRuleSpec.builder()
                 .serviceName(service.getMetadata().getName())
                 .port(port)
                 .path(path)
-                .host(host)
+                .hosts(hosts)
                 .build(), correlationId);
 
-        return host + path + "/";
+        return instancesHost + path + "/";
     }
 
     /**

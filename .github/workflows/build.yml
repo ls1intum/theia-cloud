@@ -15,7 +15,7 @@ jobs:
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
-      image-name: ghcr.io/${{ github.repository_owner }}/theia/landing-page
+      image-name: ${{ github.repository_owner }}/theia/landing-page
       docker-context: .
     secrets: inherit
 

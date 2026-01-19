@@ -1,3 +1,5 @@
+name: Build and Push Docker Images
+
 on:
   pull_request:
     branches:
@@ -9,14 +11,17 @@ on:
 
 jobs:
   build-and-push-base:
+    # Hybrid: Self-hosted for ls1intum/CodeByNikolas, GitHub-hosted for forks
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
-      image-name: ghcr.io/ls1intum/theia/landing-page
+      image-name: ghcr.io/${{ github.repository_owner }}/theia/landing-page
       docker-context: .
     secrets: inherit
+
   build-and-push-operator:
-    runs-on: ubuntu-latest
+    # Hybrid: Self-hosted for ls1intum/CodeByNikolas, GitHub-hosted for forks
+    runs-on: ${{ (github.repository_owner == 'ls1intum' || github.repository_owner == 'CodeByNikolas') && 'arc-runner-set' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -40,7 +45,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/ls1intum/theia/operator
+          images: ghcr.io/${{ github.repository_owner }}/theia/operator
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -57,8 +62,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
             SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+
   build-and-push-service:
-    runs-on: ubuntu-latest
+    # Hybrid: Self-hosted for ls1intum/CodeByNikolas, GitHub-hosted for forks
+    runs-on: ${{ (github.repository_owner == 'ls1intum' || github.repository_owner == 'CodeByNikolas') && 'arc-runner-set' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -82,7 +89,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/ls1intum/theia/service
+          images: ghcr.io/${{ github.repository_owner }}/theia/service
           tags: |
             type=ref,event=branch
             type=ref,event=pr

@@ -19,6 +19,7 @@ spec:
         app: placeholder-app
     spec:
       automountServiceAccountToken: false
+      enableServiceLinks: false
       # initContainers:
       # - name: wondershaper-init
       #   image: gcr.io/kubernetes-238012/theia-cloud-wondershaper
@@ -73,6 +74,8 @@ spec:
             value: placeholder-data-bridge-env-port
           - name: DATA_BRIDGE_ENABLED
             value: placeholder-data-bridge-enabled
+          - name: SCORPIO_THEIA_ENV_STRATEGY
+            value: placeholder-data-bridge-strategy
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

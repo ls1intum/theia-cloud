@@ -876,7 +876,7 @@ public class PrewarmedResourcePool {
             // Reserve deployment
             ISpan deploySpan = span.startChild("pool.reserve_deployment", "Reserve deployment");
             try {
-                client.kubernetes().apps().deployments().withName(instance.getDeploymentName()).edit(
+                client.kubernetes().inNamespace(session.getMetadata().getNamespace()).apps().deployments().withName(instance.getDeploymentName()).edit(
                         d -> TheiaCloudHandlerUtil.addOwnerReferenceToItem(correlationId, sessionName, sessionUID, d));
                 SentryHelper.finishSuccess(deploySpan);
             } catch (KubernetesClientException e) {
@@ -891,7 +891,7 @@ public class PrewarmedResourcePool {
                 ISpan emailSpan = span.startChild("pool.configure_email", "Configure email config");
                 String emailConfigName = TheiaCloudConfigMapUtil.getEmailConfigName(appDef, instance.getInstanceId());
                 try {
-                    client.kubernetes().configMaps().withName(emailConfigName).edit(cm -> {
+                    client.kubernetes().inNamespace(session.getMetadata().getNamespace()).configMaps().withName(emailConfigName).edit(cm -> {
                         cm.setData(Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST,
                                 session.getSpec().getUser()));
                         return cm;
@@ -1123,7 +1123,7 @@ public class PrewarmedResourcePool {
         int attempts = 0;
         while (attempts < 3) {
             try {
-                client.services().withName(service.getMetadata().getName()).edit(s -> {
+                client.services().inNamespace(service.getMetadata().getNamespace()).withName(service.getMetadata().getName()).edit(s -> {
                     TheiaCloudHandlerUtil.removeOwnerReferenceFromItem(correlationId, sessionName, sessionUID, s);
                     if (s.getMetadata().getLabels() != null) {
                         s.getMetadata().getLabels().keySet().removeAll(LabelsUtil.getSessionSpecificLabelKeys());

@@ -304,7 +304,7 @@ public class IngressManager {
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId,
                     "Failed to remove ingress rules from " + ingress.getMetadata().getName()), e);
-            return false;
+            throw e;
         }
     }
 

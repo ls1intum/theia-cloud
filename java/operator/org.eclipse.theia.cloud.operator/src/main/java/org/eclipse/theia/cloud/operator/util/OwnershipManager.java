@@ -90,6 +90,9 @@ public final class OwnershipManager {
      * Checks if a resource is owned solely by the specified owner (no other owners).
      */
     public static boolean isOwnedSolelyBy(HasMetadata resource, String ownerName, String ownerUID) {
+        if (resource.getMetadata() == null) {
+            return false;
+        }
         List<OwnerReference> refs = resource.getMetadata().getOwnerReferences();
         if (refs == null || refs.isEmpty()) {
             return false;
@@ -112,6 +115,9 @@ public final class OwnershipManager {
      * Checks if a resource has the specified owner as one of its owners.
      */
     public static boolean hasOwner(HasMetadata resource, String ownerName, String ownerUID) {
+        if (resource.getMetadata() == null) {
+            return false;
+        }
         List<OwnerReference> refs = resource.getMetadata().getOwnerReferences();
         if (refs == null || refs.isEmpty()) {
             return false;
@@ -130,6 +136,9 @@ public final class OwnershipManager {
      * Checks if a resource has the specified owner AND at least one other owner.
      */
     public static boolean hasAdditionalOwners(HasMetadata resource, String ownerName, String ownerUID) {
+        if (resource.getMetadata() == null) {
+            return false;
+        }
         List<OwnerReference> refs = resource.getMetadata().getOwnerReferences();
         if (refs == null || refs.size() < 2) {
             return false;
@@ -152,6 +161,9 @@ public final class OwnershipManager {
      * Checks if a resource has no owners.
      */
     public static boolean isOrphan(HasMetadata resource) {
+        if (resource.getMetadata() == null) {
+            return true;
+        }
         List<OwnerReference> refs = resource.getMetadata().getOwnerReferences();
         return refs == null || refs.isEmpty();
     }

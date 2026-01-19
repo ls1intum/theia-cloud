@@ -1,3 +1,5 @@
+name: Build and Push Docker Images
+
 on:
   pull_request:
     branches:
@@ -9,14 +11,9 @@ on:
 
 jobs:
   build-and-push-base:
-    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
-    with:
-      docker-file: dockerfiles/landing-page/Dockerfile
-      image-name: ghcr.io/ls1intum/theia/landing-page
-      docker-context: .
-    secrets: inherit
-  build-and-push-operator:
-    runs-on: ubuntu-latest
+    # Experimental: Self-hosted ARC runners with Docker layer caching
+    # Hybrid: Uses self-hosted for ls1intum, GitHub-hosted for forks
+    runs-on: ${{ github.repository_owner == 'ls1intum' && 'arc-runner-set-1' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -40,7 +37,50 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/ls1intum/theia/operator
+          images: ghcr.io/${{ github.repository_owner }}/theia/landing-page
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/landing-page/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-and-push-operator:
+    # Experimental: Self-hosted ARC runners with Docker layer caching
+    # Hybrid: Uses self-hosted for ls1intum, GitHub-hosted for forks
+    runs-on: ${{ github.repository_owner == 'ls1intum' && 'arc-runner-set-2' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/theia/operator
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -57,8 +97,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
             SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+
   build-and-push-service:
-    runs-on: ubuntu-latest
+    # Experimental: Self-hosted ARC runners with Docker layer caching
+    # Hybrid: Uses self-hosted for ls1intum, GitHub-hosted for forks
+    runs-on: ${{ github.repository_owner == 'ls1intum' && 'arc-runner-set-3' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -82,7 +125,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/ls1intum/theia/service
+          images: ghcr.io/${{ github.repository_owner }}/theia/service
           tags: |
             type=ref,event=branch
             type=ref,event=pr

@@ -20,6 +20,9 @@ import static org.eclipse.theia.cloud.common.util.NamingUtil.asValidName;
 import java.util.Optional;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.metrics.MetricRegistry;
+import org.eclipse.microprofile.metrics.Tag;
+import org.eclipse.microprofile.metrics.Timer;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.TheiaCloudError;
 import org.eclipse.theia.cloud.service.workspace.UserWorkspace;
@@ -44,6 +47,9 @@ public class RootResource extends BaseResource {
     @Inject
     private K8sUtil k8sUtil;
 
+    @Inject
+    private MetricRegistry metricRegistry;
+
     @Operation(summary = "Ping", description = "Replies if the service is available.")
     @GET
     @Path("/{appId}")
@@ -60,55 +66,74 @@ public class RootResource extends BaseResource {
         final String correlationId = evaluatedRequest.getCorrelationId();
         final String user = evaluatedRequest.getUser();
 
-        if (!k8sUtil.hasAppDefinition(request.appDefinition)) {
-            error(correlationId,
-                    "Failed to launch session. App Definition '" + request.appDefinition + "' does not exist.");
-            throw new TheiaCloudWebException(TheiaCloudError.INVALID_APP_DEFINITION_NAME);
-        }
+        // Create dynamic tags for metrics
+        Tag appDefinitionTag = new Tag("app_definition", request.appDefinition);
+        Tag namespaceTag = new Tag("namespace", k8sUtil.getNamespace());
 
-        if (k8sUtil.isMaxInstancesReached(request.appDefinition)) {
-            error(correlationId, "Failed to launch session. App Definition '" + request.appDefinition
-                    + "' has max instances reached.");
-            throw new TheiaCloudWebException(TheiaCloudError.SESSION_SERVER_LIMIT_REACHED);
-        }
+        // Get or create timer with dynamic tags
+        Timer timer = metricRegistry.timer(
+            "application.theiacloud.session.startup.seconds",
+            appDefinitionTag,
+            namespaceTag
+        );
 
-        if (request.isEphemeral()) {
-            info(correlationId, "Launching ephemeral session " + request);
-            return k8sUtil.launchEphemeralSession(correlationId, request.appDefinition, user, request.timeout,
-                    request.env);
-        }
+        // Start timing
+        Timer.Context timerContext = timer.time();
 
-        if (request.isExistingWorkspace()) {
-            Optional<Workspace> workspace = k8sUtil.getWorkspace(user, asValidName(request.workspaceName));
-            if (workspace.isPresent()) {
-                String workspaceAppDefinition = workspace.get().getSpec().getAppDefinition();
-                if (!workspaceAppDefinition.equals(request.appDefinition)) {
-                    error(correlationId,
-                            "Failed to launch session. Workspace App Definition '" + workspaceAppDefinition
-                                    + "' does not match Request App Definition '" + request.appDefinition
-                                    + "' does not exist.");
-                    throw new TheiaCloudWebException(TheiaCloudError.APP_DEFINITION_NAME_MISMATCH);
-                }
-
-                info(correlationId, "Launching existing workspace session " + request);
-                return k8sUtil.launchWorkspaceSession(correlationId, new UserWorkspace(workspace.get().getSpec()),
-                        request.timeout, request.env);
-            }
-        }
-
-        info(correlationId, "Create workspace " + request);
-        Workspace workspace = k8sUtil.createWorkspace(correlationId,
-                new UserWorkspace(request.appDefinition, user, request.workspaceName, request.label));
-        TheiaCloudWebException.throwIfErroneous(workspace);
-
-        info(correlationId, "Launch workspace session " + request);
         try {
-            return k8sUtil.launchWorkspaceSession(correlationId, new UserWorkspace(workspace.getSpec()),
-                    request.timeout, request.env);
-        } catch (Exception exception) {
-            info(correlationId, "Delete workspace due to launch error " + request);
-            k8sUtil.deleteWorkspace(correlationId, workspace.getSpec().getName());
-            throw exception;
+            if (!k8sUtil.hasAppDefinition(request.appDefinition)) {
+                error(correlationId,
+                        "Failed to launch session. App Definition '" + request.appDefinition + "' does not exist.");
+                throw new TheiaCloudWebException(TheiaCloudError.INVALID_APP_DEFINITION_NAME);
+            }
+
+            if (k8sUtil.isMaxInstancesReached(request.appDefinition)) {
+                error(correlationId, "Failed to launch session. App Definition '" + request.appDefinition
+                        + "' has max instances reached.");
+                throw new TheiaCloudWebException(TheiaCloudError.SESSION_SERVER_LIMIT_REACHED);
+            }
+
+            if (request.isEphemeral()) {
+                info(correlationId, "Launching ephemeral session " + request);
+                return k8sUtil.launchEphemeralSession(correlationId, request.appDefinition, user, request.timeout,
+                        request.env);
+            }
+
+            if (request.isExistingWorkspace()) {
+                Optional<Workspace> workspace = k8sUtil.getWorkspace(user, asValidName(request.workspaceName));
+                if (workspace.isPresent()) {
+                    String workspaceAppDefinition = workspace.get().getSpec().getAppDefinition();
+                    if (!workspaceAppDefinition.equals(request.appDefinition)) {
+                        error(correlationId,
+                                "Failed to launch session. Workspace App Definition '" + workspaceAppDefinition
+                                        + "' does not match Request App Definition '" + request.appDefinition
+                                        + "' does not exist.");
+                        throw new TheiaCloudWebException(TheiaCloudError.APP_DEFINITION_NAME_MISMATCH);
+                    }
+
+                    info(correlationId, "Launching existing workspace session " + request);
+                    return k8sUtil.launchWorkspaceSession(correlationId, new UserWorkspace(workspace.get().getSpec()),
+                            request.timeout, request.env);
+                }
+            }
+
+            info(correlationId, "Create workspace " + request);
+            Workspace workspace = k8sUtil.createWorkspace(correlationId,
+                    new UserWorkspace(request.appDefinition, user, request.workspaceName, request.label));
+            TheiaCloudWebException.throwIfErroneous(workspace);
+
+            info(correlationId, "Launch workspace session " + request);
+            try {
+                return k8sUtil.launchWorkspaceSession(correlationId, new UserWorkspace(workspace.getSpec()),
+                        request.timeout, request.env);
+            } catch (Exception exception) {
+                info(correlationId, "Delete workspace due to launch error " + request);
+                k8sUtil.deleteWorkspace(correlationId, workspace.getSpec().getName());
+                throw exception;
+            }
+        } finally {
+            // Stop timing and record the measurement
+            timerContext.stop();
         }
     }
 }

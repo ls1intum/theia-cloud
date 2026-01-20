@@ -19,6 +19,7 @@ spec:
         app: placeholder-app
     spec:
       automountServiceAccountToken: false
+      enableServiceLinks: false
       containers:
         - name: oauth2-proxy
           image: quay.io/oauth2-proxy/oauth2-proxy:placeholder-oauth2-proxy-version
@@ -47,6 +48,7 @@ spec:
             - containerPort: placeholder-port
               name: application
             placeholder-monitor-port
+            placeholder-data-bridge-container-port
           resources:
             limits:
               cpu: placeholder-cpu-limits
@@ -55,6 +57,8 @@ spec:
               cpu: placeholder-cpu-requests
               memory: placeholder-memory-requests
           env:
+          - name: THEIACLOUD_SERVICE_AUTH_TOKEN
+            value: placeholder-env-service-auth-token
           - name: THEIACLOUD_APP_ID
             value: placeholder-env-app-id
           - name: THEIACLOUD_SERVICE_URL
@@ -85,6 +89,14 @@ spec:
             value: placeholder-cache-url
           - name: REMOTE_CACHE_PUSH
             value: placeholder-cache-push
+          - name: DATA_BRIDGE_PORT
+            value: placeholder-data-bridge-env-port
+          - name: DATA_BRIDGE_ENABLED
+            value: placeholder-data-bridge-enabled
+          - name: SCORPIO_THEIA_ENV_STRATEGY
+            value: placeholder-data-bridge-strategy
+          - name: THEIA
+            value: 1
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

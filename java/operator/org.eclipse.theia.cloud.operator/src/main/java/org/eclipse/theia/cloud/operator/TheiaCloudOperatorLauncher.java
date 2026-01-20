@@ -26,6 +26,7 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 
 import picocli.CommandLine;
+import picocli.CommandLine.ParameterException;
 
 public abstract class TheiaCloudOperatorLauncher {
 
@@ -36,22 +37,35 @@ public abstract class TheiaCloudOperatorLauncher {
     protected TheiaCloudOperatorArguments args;
 
     public void runMain(String[] args) throws InterruptedException {
-        this.args = createArguments(args);
-        AbstractTheiaCloudOperatorModule module = createModule(this.args);
-        LOGGER.info(formatLogMessage(COR_ID_INIT, "Using " + module.getClass().getName() + " as DI module"));
+        try {
+            this.args = createArguments(args);
+            AbstractTheiaCloudOperatorModule module = createModule(this.args);
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Using " + module.getClass().getName() + " as DI module"));
 
-        Injector injector = Guice.createInjector(module);
-        TheiaCloudOperator theiaCloud = injector.getInstance(TheiaCloudOperator.class);
-        LOGGER.info(formatLogMessage(COR_ID_INIT, "Launching Theia Cloud Now"));
-        theiaCloud.start();
+            Injector injector = Guice.createInjector(module);
+            TheiaCloudOperator theiaCloud = injector.getInstance(TheiaCloudOperator.class);
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Launching Theia Cloud Now"));
+            theiaCloud.start();
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Error during operator startup"), e);
+            throw e;
+        }
     }
 
     public TheiaCloudOperatorArguments createArguments(String[] args) {
-        TheiaCloudOperatorArguments arguments = new TheiaCloudOperatorArguments();
-        CommandLine commandLine = new CommandLine(arguments).setTrimQuotes(true);
-        commandLine.parseArgs(args);
-        LOGGER.info(formatLogMessage(COR_ID_INIT, "Parsed args: " + arguments));
-        return arguments;
+        try {
+            TheiaCloudOperatorArguments arguments = new TheiaCloudOperatorArguments();
+            CommandLine commandLine = new CommandLine(arguments).setTrimQuotes(true);
+            commandLine.parseArgs(args);
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Parsed args: " + arguments));
+            return arguments;
+        } catch (ParameterException e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Failed to parse command line arguments"), e);
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Unexpected error parsing arguments"), e);
+            throw e;
+        }
     }
 
     abstract AbstractTheiaCloudOperatorModule createModule(TheiaCloudOperatorArguments arguments);

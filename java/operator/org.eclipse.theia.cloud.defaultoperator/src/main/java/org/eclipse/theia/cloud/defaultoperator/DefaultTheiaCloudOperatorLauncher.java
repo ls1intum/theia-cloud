@@ -15,14 +15,33 @@
  ********************************************************************************/
 package org.eclipse.theia.cloud.defaultoperator;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.operator.LeaderElectionTheiaCloudOperatorLauncher;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.di.AbstractTheiaCloudOperatorModule;
 
+import io.sentry.Sentry;
+
 public class DefaultTheiaCloudOperatorLauncher extends LeaderElectionTheiaCloudOperatorLauncher {
 
-    public static void main(String[] args) throws InterruptedException {
-        new DefaultTheiaCloudOperatorLauncher().runMain(args);
+    private static final Logger LOGGER = LogManager.getLogger(DefaultTheiaCloudOperatorLauncher.class);
+
+    public static void main(String[] args) {
+        try {
+            Sentry.configureScope(scope -> {
+                scope.setTag("component", "operator");
+            });
+            new DefaultTheiaCloudOperatorLauncher().runMain(args);
+        } catch (InterruptedException e) {
+            LOGGER.error("Operator interrupted", e);
+            Thread.currentThread().interrupt();
+            System.exit(1);
+        } catch (Throwable t) {
+            LOGGER.error("Fatal error starting operator", t);
+            t.printStackTrace();
+            System.exit(1);
+        }
     }
 
     @Override

@@ -36,6 +36,10 @@ import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElectionConfig
 import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElectionConfigBuilder;
 import io.fabric8.kubernetes.client.extended.leaderelection.LeaderElector;
 import io.fabric8.kubernetes.client.extended.leaderelection.resourcelock.LeaseLock;
+import io.fabric8.kubernetes.client.okhttp.OkHttpClientFactory;
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
+import okhttp3.OkHttpClient;
 
 public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaCloudOperatorLauncher {
 
@@ -64,8 +68,18 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
 
         Config k8sConfig = new ConfigBuilder().build();
 
-        try (KubernetesClient k8sClient = new KubernetesClientBuilder().withConfig(k8sConfig).build()) {
+        try (KubernetesClient k8sClient = new KubernetesClientBuilder()
+                .withConfig(k8sConfig)
+                .withHttpClientFactory(new OkHttpClientFactory() {
+                    @Override
+                    protected void additionalConfig(OkHttpClient.Builder builder) {
+                        builder.addInterceptor(new SentryOkHttpInterceptor());
+                        builder.eventListener(new SentryOkHttpEventListener());
+                    }
+                })
+                .build()) {
             String leaseLockNamespace = k8sClient.getNamespace();
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Using namespace: " + leaseLockNamespace));
 
             LeaderElectionConfig leaderElectionConfig = new LeaderElectionConfigBuilder()//
                     .withReleaseOnCancel(true)//
@@ -88,12 +102,20 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
                     .build();
             LeaderElector leaderElector = k8sClient.leaderElector().withConfig(leaderElectionConfig).build();
             leaderElector.run();
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Error during leader election"), e);
+            throw new RuntimeException("Failed to start leader election", e);
         }
     }
 
     protected void onStartLeading() {
         LOGGER.info(formatLogMessage(COR_ID_INIT, "Elected as new leader!"));
-        startOperatorAsLeader(args);
+        try {
+            startOperatorAsLeader(args);
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Error starting operator as leader"), e);
+            throw new RuntimeException("Failed to start operator as leader", e);
+        }
     }
 
     protected void onStopLeading() {
@@ -106,14 +128,19 @@ public abstract class LeaderElectionTheiaCloudOperatorLauncher extends TheiaClou
     }
 
     protected void startOperatorAsLeader(TheiaCloudOperatorArguments arguments) {
-        AbstractTheiaCloudOperatorModule module = createModule(arguments);
-        LOGGER.info(formatLogMessage(COR_ID_INIT, "Using " + module.getClass().getName() + " as DI module"));
+        try {
+            AbstractTheiaCloudOperatorModule module = createModule(arguments);
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Using " + module.getClass().getName() + " as DI module"));
 
-        Injector injector = Guice.createInjector(module);
-        TheiaCloudOperator theiaCloud = injector.getInstance(TheiaCloudOperator.class);
+            Injector injector = Guice.createInjector(module);
+            TheiaCloudOperator theiaCloud = injector.getInstance(TheiaCloudOperator.class);
 
-        LOGGER.info(formatLogMessage(COR_ID_INIT, "Launching Theia Cloud Now"));
-        theiaCloud.start();
+            LOGGER.info(formatLogMessage(COR_ID_INIT, "Launching Theia Cloud Now"));
+            theiaCloud.start();
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(COR_ID_INIT, "Error during operator initialization"), e);
+            throw e;
+        }
     }
 
     @Override

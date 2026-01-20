@@ -58,8 +58,10 @@ public final class TheiaCloudK8sUtil {
                 .filter(w -> {
                     String sessionAppDefinition = w.getSpec().getAppDefinition();
                     // Errored resources should not be counted
-                    boolean result = appDefinitionName.equals(sessionAppDefinition)
-                            && !OperatorStatus.ERROR.equals(w.getStatus().getOperatorStatus());
+                    // if status is null, treat as not ERROR
+                    boolean isNotError = w.getStatus() == null
+                            || !OperatorStatus.ERROR.equals(w.getStatus().getOperatorStatus());
+                    boolean result = appDefinitionName.equals(sessionAppDefinition) && isNotError;
                     LOGGER.trace(formatLogMessage(correlationId,
                             "Counting handled instances of app definition " + appDefinitionSpec.getName() + ": Is "
                                     + w.getSpec() + " of app definition and handled? " + result));

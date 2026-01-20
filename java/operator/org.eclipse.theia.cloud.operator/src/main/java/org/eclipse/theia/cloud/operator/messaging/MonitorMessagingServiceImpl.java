@@ -22,7 +22,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
+import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.util.SessionUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.json.JSONObject;
 
@@ -32,6 +34,9 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+
+import io.sentry.okhttp.SentryOkHttpEventListener;
+import io.sentry.okhttp.SentryOkHttpInterceptor;
 
 public class MonitorMessagingServiceImpl implements MonitorMessagingService {
 
@@ -45,6 +50,11 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
 
     @Inject
     private TheiaCloudOperatorArguments arguments;
+
+    private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .addInterceptor(new SentryOkHttpInterceptor())
+            .eventListener(new SentryOkHttpEventListener())
+            .build();
 
     @Override
     public void sendMessage(Session session, String level, String message) {
@@ -70,20 +80,18 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
     }
 
     protected void postMessage(Session session, String level, String message, boolean fullscreen, String detail) {
-        OkHttpClient client = new OkHttpClient().newBuilder().build();
-
         Optional<String> postMessageURL = getURL(session);
         if (postMessageURL.isPresent()) {
             MediaType mediaType = MediaType.parse("application/json; charset=utf-8");
             String json = new JSONObject().put("message", message).put("level", level).put("fullscreen", fullscreen)
                     .put("detail", detail).toString();
 
-            RequestBody body = RequestBody.create(mediaType, json);
+            RequestBody body = RequestBody.create(json, mediaType);
             Request postRequest = new Request.Builder().url(postMessageURL.get())
                     .addHeader("Authorization", "Bearer " + session.getSpec().getSessionSecret()).method("POST", body)
                     .build();
             try {
-                client.newCall(postRequest).execute();
+                httpClient.newCall(postRequest).execute();
             } catch (IOException e) {
                 LOGGER.info("[" + session.getSpec().getName() + "] Could not send message to extension:" + e);
             }
@@ -91,7 +99,7 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
     }
 
     protected Optional<String> getURL(Session session) {
-        Optional<String> ip = getIP(session);
+        Optional<String> ip = SessionUtil.getClusterIP(resourceClient, session);
         Optional<Integer> port = getPort(session);
         if (ip.isPresent() && port.isPresent()) {
             return Optional.of("http://" + ip.get() + ":" + port.get() + MONITOR_BASE_PATH + POST_MESSAGE);
@@ -99,18 +107,12 @@ public class MonitorMessagingServiceImpl implements MonitorMessagingService {
         return Optional.empty();
     }
 
-    protected Optional<String> getIP(Session session) {
-        Optional<String> sessionIP = resourceClient.getClusterIPFromSessionName(session.getSpec().getName());
-        return sessionIP;
-    }
-
     protected Optional<Integer> getPort(Session session) {
         String appDefinitionId = session.getSpec().getAppDefinition();
-        Optional<AppDefinition> optionalAppDefinition = resourceClient.appDefinitions().get(appDefinitionId);
-        if (optionalAppDefinition.isPresent()) {
-            return Optional.of(optionalAppDefinition.get().getSpec().getMonitor().getPort());
-        }
-        return Optional.empty();
+        return resourceClient.appDefinitions().get(appDefinitionId)//
+                .map(AppDefinition::getSpec)//
+                .map(AppDefinitionSpec::getMonitor)//
+                .map(AppDefinitionSpec.Monitor::getPort);
     }
 
     protected boolean isEnabled() {

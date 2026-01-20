@@ -18,6 +18,7 @@ package org.eclipse.theia.cloud.operator.di;
 
 import java.util.function.Consumer;
 
+import org.eclipse.theia.cloud.common.k8s.client.DataBridgeClient;
 import org.eclipse.theia.cloud.common.k8s.client.DefaultTheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
@@ -31,7 +32,7 @@ import org.eclipse.theia.cloud.operator.bandwidth.BandwidthLimiterImpl;
 import org.eclipse.theia.cloud.operator.handler.appdef.AppDefinitionHandler;
 import org.eclipse.theia.cloud.operator.handler.appdef.EagerStartAppDefinitionAddedHandler;
 import org.eclipse.theia.cloud.operator.handler.appdef.LazyStartAppDefinitionHandler;
-import org.eclipse.theia.cloud.operator.handler.session.EagerSessionHandler;
+import org.eclipse.theia.cloud.operator.handler.session.EagerWithLazyFallbackSessionHandler;
 import org.eclipse.theia.cloud.operator.handler.session.LazySessionHandler;
 import org.eclipse.theia.cloud.operator.handler.session.SessionHandler;
 import org.eclipse.theia.cloud.operator.handler.ws.LazyWorkspaceHandler;
@@ -46,9 +47,11 @@ import org.eclipse.theia.cloud.operator.pv.DefaultPersistentVolumeCreator;
 import org.eclipse.theia.cloud.operator.pv.MinikubePersistentVolumeCreator;
 import org.eclipse.theia.cloud.operator.pv.PersistentVolumeCreator;
 import org.eclipse.theia.cloud.operator.replacements.DefaultDeploymentTemplateReplacements;
+import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.replacements.DefaultPersistentVolumeTemplateReplacements;
 import org.eclipse.theia.cloud.operator.replacements.DeploymentTemplateReplacements;
 import org.eclipse.theia.cloud.operator.replacements.PersistentVolumeTemplateReplacements;
+import org.eclipse.theia.cloud.operator.util.SessionEnvCollector;
 
 import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
@@ -81,6 +84,9 @@ public abstract class AbstractTheiaCloudOperatorModule extends AbstractModule {
 
         configure(MultiBinding.create(OperatorPlugin.class), this::bindOperatorPlugins);
         bind(MonitorMessagingService.class).to(bindMonitorMessagingService()).in(Singleton.class);
+        bind(DataBridgeClient.class).toProvider(DataBridgeClientProvider.class).in(Singleton.class);
+        bind(SessionEnvCollector.class).in(Singleton.class);
+        bind(AsyncDataInjector.class).in(Singleton.class);
         bind(TheiaCloudOperatorArguments.class).toInstance(arguments);
     }
 
@@ -143,7 +149,7 @@ public abstract class AbstractTheiaCloudOperatorModule extends AbstractModule {
 
     protected Class<? extends SessionHandler> bindSessionHandler() {
         if (arguments.isEagerStart()) {
-            return EagerSessionHandler.class;
+            return EagerWithLazyFallbackSessionHandler.class;
         } else {
             return LazySessionHandler.class;
         }

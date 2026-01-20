@@ -64,6 +64,10 @@ import io.fabric8.kubernetes.api.model.SecretEnvSource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
+import io.sentry.ISpan;
+import io.sentry.ITransaction;
+import io.sentry.Sentry;
+import io.sentry.SpanStatus;
 
 public final class AddedHandlerUtil {
 
@@ -73,6 +77,7 @@ public final class AddedHandlerUtil {
 
     public static final String TEMPLATE_SERVICE_YAML = "/templateService.yaml";
     public static final String TEMPLATE_SERVICE_WITHOUT_AOUTH2_PROXY_YAML = "/templateServiceWithoutOAuthProxy.yaml";
+    public static final String TEMPLATE_INTERNAL_SERVICE_YAML = "/templateInternalService.yaml";
     public static final String TEMPLATE_CONFIGMAP_EMAILS_YAML = "/templateConfigmapEmails.yaml";
     public static final String TEMPLATE_CONFIGMAP_YAML = "/templateConfigmap.yaml";
     public static final String TEMPLATE_DEPLOYMENT_YAML = "/templateDeployment.yaml";
@@ -88,6 +93,7 @@ public final class AddedHandlerUtil {
     public static final String FILENAME_AUTHENTICATED_EMAILS_LIST = "authenticated-emails-list";
 
     public static final String INGRESS_REWRITE_PATH = "(/|$)(.*)";
+    public static final String INGRESS_PATH_TYPE = "ImplementationSpecific";
 
     private static final HostnameVerifier ALL_GOOD_HOSTNAME_VERIFIER = new HostnameVerifier() {
         @Override
@@ -131,82 +137,138 @@ public final class AddedHandlerUtil {
 
     public static void updateSessionURLAsync(SessionResourceClient sessions, Session session, String namespace,
             String url, String correlationId) {
+        String sessionName = session.getSpec().getName();
+        String appDef = session.getSpec().getAppDefinition();
+
         EXECUTOR.execute(() -> {
+            // Start a new transaction for the async URL availability check
+            ITransaction tx = Sentry.startTransaction("session.url_availability", "session");
+            tx.setTag("session.name", sessionName);
+            tx.setTag("app_definition", appDef);
+            tx.setData("correlation_id", correlationId);
+            tx.setData("url", url);
+
+            long startTime = System.currentTimeMillis();
             boolean updateURL = false;
-            for (int i = 1; i <= 100; i++) {
-                try {
-                    /*
-                     * On the first 15 loops we will check every 2.5s whether URL is available. This will take at least
-                     * 37.5s. On the second 15 loops we will check every 5s. This will take at least 75s. On the next 15
-                     * loops we will check every 10s. This will take at least further 150s. If the pod has not started
-                     * within the first 4-5 minutes, we will continue to check every minute. We give up after an hour.
-                     */
-                    if (i <= 15) {
-                        Thread.sleep(2500);
-                    } else if (i <= 30) {
-                        Thread.sleep(5000);
-                    } else if (i <= 45) {
-                        Thread.sleep(10000);
-                    } else {
-                        Thread.sleep(60000);
+            int lastResponseCode = -1;
+            String failureReason = null;
+
+            try {
+                for (int i = 1; i <= 100; i++) {
+                    try {
+                        /*
+                         * On the first 15 loops we will check every 2.5s whether URL is available. This will take at
+                         * least 37.5s. On the second 15 loops we will check every 5s. This will take at least 75s. On
+                         * the next 15 loops we will check every 10s. This will take at least further 150s. If the pod
+                         * has not started within the first 4-5 minutes, we will continue to check every minute. We
+                         * give up after an hour.
+                         */
+                        if (i <= 15) {
+                            Thread.sleep(2500);
+                        } else if (i <= 30) {
+                            Thread.sleep(5000);
+                        } else if (i <= 45) {
+                            Thread.sleep(10000);
+                        } else {
+                            Thread.sleep(60000);
+                        }
+                    } catch (InterruptedException e) {
+                        /* silent */
                     }
-                } catch (InterruptedException e) {
-                    /* silent */
+
+                    HttpsURLConnection connection;
+                    try {
+                        connection = (HttpsURLConnection) new URL(HOST_PROTOCOL + url).openConnection();
+                    } catch (IOException e) {
+                        LOGGER.error(formatLogMessage(correlationId, "Error while checking session availability."), e);
+                        failureReason = "connection_error";
+                        continue;
+                    }
+                    int code;
+
+                    try {
+                        connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);
+                        SSLContext sc = SSLContext.getInstance("SSL");
+                        sc.init(null, new TrustManager[] { TRUST_ALL_MANAGER }, new java.security.SecureRandom());
+                        HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+                        connection.setSSLSocketFactory(sc.getSocketFactory());
+                        connection.connect();
+                        code = connection.getResponseCode();
+                        lastResponseCode = code;
+                    } catch (IOException e) {
+                        LOGGER.error(formatLogMessage(correlationId, url + " is NOT available yet."), e);
+                        failureReason = "io_error";
+                        continue;
+                    } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Error while checking session availability with SSL ignore."), e);
+                        failureReason = "ssl_error";
+                        continue;
+                    }
+
+                    LOGGER.trace(formatLogMessage(correlationId, url + " has response code " + code));
+
+                    if (code == 200) {
+                        updateURL = true;
+                    } else if (code != 404 && code != 503 && !updateURL) {
+                        /*
+                         * we don't get a 404 or 503, so something is available. Try accessing the URL once more then
+                         * update URL anyway
+                         */
+                        updateURL = true;
+                        continue;
+                    }
+
+                    if (updateURL) {
+                        LOGGER.info(formatLogMessage(correlationId, url + " is available."));
+
+                        ISpan updateSpan = tx.startChild("session.update_status", "Update session URL status");
+                        try {
+                            sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
+                            updateSpan.setStatus(SpanStatus.OK);
+                        } catch (Exception e) {
+                            updateSpan.setThrowable(e);
+                            updateSpan.setStatus(SpanStatus.INTERNAL_ERROR);
+                            Sentry.captureException(e);
+                        } finally {
+                            updateSpan.finish();
+                        }
+
+                        LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));
+
+                        long duration = System.currentTimeMillis() - startTime;
+                        tx.setTag("outcome", "success");
+                        tx.setData("attempts", i);
+                        tx.setData("time_to_available_ms", duration);
+                        tx.setData("final_response_code", code);
+                        tx.setStatus(SpanStatus.OK);
+                        tx.finish();
+                        return;
+                    } else {
+                        LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
+                    }
                 }
 
-                HttpsURLConnection connection;
-                try {
-                    connection = (HttpsURLConnection) new URL(HOST_PROTOCOL + url).openConnection();
-                } catch (IOException e) {
-                    LOGGER.error(formatLogMessage(correlationId, "Error while checking session availability."), e);
-                    continue;
+                // Exhausted all attempts
+                long duration = System.currentTimeMillis() - startTime;
+                tx.setTag("outcome", "timeout");
+                tx.setData("attempts", 100);
+                tx.setData("duration_ms", duration);
+                tx.setData("last_response_code", lastResponseCode);
+                if (failureReason != null) {
+                    tx.setTag("failure.reason", failureReason);
                 }
-                int code;
+                tx.setStatus(SpanStatus.DEADLINE_EXCEEDED);
+                tx.finish();
 
-                try {
-                    connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);
-                    SSLContext sc = SSLContext.getInstance("SSL");
-                    sc.init(null, new TrustManager[] { TRUST_ALL_MANAGER }, new java.security.SecureRandom());
-                    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-                    connection.setSSLSocketFactory(sc.getSocketFactory());
-                    connection.connect();
-                    code = connection.getResponseCode();
-                } catch (IOException e) {
-                    LOGGER.error(formatLogMessage(correlationId, url + " is NOT available yet."), e);
-                    continue;
-                } catch (NoSuchAlgorithmException | KeyManagementException e) {
-                    LOGGER.error(formatLogMessage(correlationId,
-                            "Error while checking session availability with SSL ignore."), e);
-                    continue;
-                }
-
-                LOGGER.trace(formatLogMessage(correlationId, url + " has response code " + code));
-
-                if (code == 200) {
-                    updateURL = true;
-                } else if (code != 404 && code != 503 && !updateURL) {
-                    /*
-                     * we don't get a 404 or 503, so something is available. Try accessing the URL once more then update
-                     * URL anyway
-                     */
-                    updateURL = true;
-                    continue;
-                }
-
-                if (updateURL) {
-                    LOGGER.info(formatLogMessage(correlationId, url + " is available."));
-                    sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
-                    LOGGER.info(
-                            formatMetric(correlationId, "Running session for " + session.getSpec().getAppDefinition()));
-                    break;
-                } else {
-                    LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
-                }
-
+            } catch (Exception e) {
+                tx.setTag("outcome", "error");
+                tx.setThrowable(e);
+                tx.setStatus(SpanStatus.INTERNAL_ERROR);
+                Sentry.captureException(e);
+                tx.finish();
             }
-
         });
-
     }
 
     public static void removeEmptyResources(Deployment deployment) {

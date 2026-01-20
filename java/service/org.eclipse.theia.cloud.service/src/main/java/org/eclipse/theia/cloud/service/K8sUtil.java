@@ -57,6 +57,10 @@ public final class K8sUtil {
 
     protected final Logger logger = Logger.getLogger(getClass());
 
+    public String getNamespace() {
+        return CLIENT.namespace();
+    }
+
     public Workspace createWorkspace(String correlationId, UserWorkspace data) {
         WorkspaceSpec spec = new WorkspaceSpec(data.name, data.label, data.appDefinition, data.user);
         return CLIENT.workspaces().launch(correlationId, spec);
@@ -79,12 +83,14 @@ public final class K8sUtil {
         return CLIENT.sessions().specs(user);
     }
 
+    @Deprecated(forRemoval = true)
+    /** @deprecated use findSession instead */
     public Optional<SessionSpec> findExistingSession(SessionSpec spec) {
         return CLIENT.sessions().specs().stream().filter(sessionSpec -> sessionSpec.equals(spec)).findAny();
     }
 
-    public Optional<SessionSpec> findSession(String sessionName) {
-        return CLIENT.sessions().get(sessionName).map(Session::getSpec);
+    public Optional<Session> findSession(String sessionName) {
+        return CLIENT.sessions().get(sessionName);
     }
 
     public String launchEphemeralSession(String correlationId, String appDefinition, String user, int timeout,

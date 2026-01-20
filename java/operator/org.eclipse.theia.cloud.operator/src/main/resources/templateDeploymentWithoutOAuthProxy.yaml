@@ -19,6 +19,7 @@ spec:
         app: placeholder-app
     spec:
       automountServiceAccountToken: false
+      enableServiceLinks: false
       # initContainers:
       # - name: wondershaper-init
       #   image: gcr.io/kubernetes-238012/theia-cloud-wondershaper
@@ -34,6 +35,7 @@ spec:
             - containerPort: placeholder-port
               name: application
             placeholder-monitor-port
+            placeholder-data-bridge-container-port
           resources:
             limits:
               cpu: placeholder-cpu-limits
@@ -42,6 +44,8 @@ spec:
               cpu: placeholder-cpu-requests
               memory: placeholder-memory-requests
           env:
+          - name: THEIACLOUD_SERVICE_AUTH_TOKEN
+            value: placeholder-env-service-auth-token
           - name: THEIACLOUD_APP_ID
             value: placeholder-env-app-id
           - name: THEIACLOUD_SERVICE_URL
@@ -72,6 +76,12 @@ spec:
             value: placeholder-cache-url
           - name: REMOTE_CACHE_PUSH
             value: placeholder-cache-push
+          - name: DATA_BRIDGE_PORT
+            value: placeholder-data-bridge-env-port
+          - name: DATA_BRIDGE_ENABLED
+            value: placeholder-data-bridge-enabled
+          - name: SCORPIO_THEIA_ENV_STRATEGY
+            value: placeholder-data-bridge-strategy
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid

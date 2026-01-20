@@ -472,9 +472,6 @@ public class LazySessionHandler implements SessionHandler {
             AddedHandlerUtil.addCustomEnvVarsToDeploymentFromSession(correlationId, deployment, session,
                 appDefinition);
 
-            // If caching is enabled, configure remote build cache via environment variables
-            AddedHandlerUtil.configureRemoteCaching(correlationId, deployment, appDefinition, arguments);
-
                     if (appDefinition.getSpec().getPullSecret() != null
                             && !appDefinition.getSpec().getPullSecret().isEmpty()) {
                         AddedHandlerUtil.addImagePullSecret(deployment, appDefinition.getSpec().getPullSecret());

@@ -162,17 +162,6 @@ public class EagerSessionHandler implements SessionHandler {
             return false;
         }
 
-        // If caching is enabled, configure remote build cache via environment variables
-        try {
-            client.kubernetes().apps().deployments().withName(deploymentName).edit(deployment -> {
-                AddedHandlerUtil.configureRemoteCaching(correlationId, deployment, appDefinition.get(), arguments);
-                return deployment;
-            });
-        } catch (KubernetesClientException e) {
-            LOGGER.warn(formatLogMessage(correlationId, "Could not configure remote caching for deployment " + deploymentName), e);
-            // non-fatal: continue
-        }
-
         if (arguments.isUseKeycloak()) {
             /* add user to allowed emails */
             try {

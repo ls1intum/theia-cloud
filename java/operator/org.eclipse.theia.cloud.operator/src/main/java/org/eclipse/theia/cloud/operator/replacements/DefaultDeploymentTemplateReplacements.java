@@ -65,6 +65,10 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
     public static final String PLACEHOLDER_ENABLE_ACTIVITY_TRACKER = "placeholder-enable-activity-tracker";
     public static final String PLACEHOLDER_OAUTH2_PROXY_VERSION = "placeholder-oauth2-proxy-version";
 
+    public static final String PLACEHOLDER_ENV_CACHE_ENABLED = "placeholder-cache-enabled";
+    public static final String PLACEHOLDER_ENV_CACHE_URL = "placeholder-cache-url";
+    public static final String PLACEHOLDER_ENV_CACHE_PUSH = "placeholder-cache-push";
+
     protected static final String DEFAULT_UID = "1000";
 
     @Inject
@@ -143,6 +147,17 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
             environmentVariables.put(PLACEHOLDER_ENV_SESSION_KEYCLOAK_URL, "");
             environmentVariables.put(PLACEHOLDER_ENV_SESSION_KEYCLOAK_REALM, "");
             environmentVariables.put(PLACEHOLDER_ENV_SESSION_KEYCLOAK_CLIENT_ID, "");
+        }
+
+        if (arguments.isEnableCaching() && arguments.getCacheUrl() != null
+                && !arguments.getCacheUrl().trim().isEmpty()) {
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_ENABLED, "true");
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_URL, arguments.getCacheUrl().trim());
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_PUSH, "true");
+        } else {
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_ENABLED, "false");
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_URL, "");
+            environmentVariables.put(PLACEHOLDER_ENV_CACHE_PUSH, "false");
         }
 
         if (arguments.isEnableMonitor()) {

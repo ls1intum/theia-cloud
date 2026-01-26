@@ -70,6 +70,12 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
+          - name: REMOTE_CACHE_ENABLED
+            value: placeholder-cache-enabled
+          - name: REMOTE_CACHE_URL
+            value: placeholder-cache-url
+          - name: REMOTE_CACHE_PUSH
+            value: placeholder-cache-push
           - name: DATA_BRIDGE_PORT
             value: placeholder-data-bridge-env-port
           - name: DATA_BRIDGE_ENABLED

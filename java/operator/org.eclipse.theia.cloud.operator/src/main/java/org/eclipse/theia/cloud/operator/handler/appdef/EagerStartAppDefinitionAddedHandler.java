@@ -83,11 +83,6 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
             return success;
 
         } catch (Exception e) {
-            Sentry.withScope(scope -> {
-                scope.setTag("operation", "appdef.added");
-                scope.setTag("correlation_id", correlationId);
-                Sentry.captureException(e);
-            });
             Tracing.finishError(tx, e);
             throw e;
         }
@@ -120,11 +115,6 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
             return success;
 
         } catch (Exception e) {
-            Sentry.withScope(scope -> {
-                scope.setTag("operation", "appdef.deleted");
-                scope.setTag("correlation_id", correlationId);
-                Sentry.captureException(e);
-            });
             Tracing.finishError(tx, e);
             throw e;
         }

@@ -44,7 +44,6 @@ import org.eclipse.theia.cloud.operator.plugins.OperatorPlugin;
 import org.eclipse.theia.cloud.operator.util.SpecWatch;
 
 import io.sentry.ITransaction;
-import io.sentry.Sentry;
 
 import com.google.inject.Inject;
 

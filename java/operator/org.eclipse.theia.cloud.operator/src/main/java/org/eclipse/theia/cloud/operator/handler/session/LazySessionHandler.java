@@ -113,221 +113,205 @@ public class LazySessionHandler implements SessionHandler {
         span.setTag("session.strategy", "lazy");
         span.setData("correlation_id", correlationId);
 
-        try {
-            // Check current session status and ignore if handling failed or finished before
-            Optional<SessionStatus> status = Optional.ofNullable(session.getStatus());
-            String operatorStatus = status.map(ResourceStatus::getOperatorStatus).orElse(OperatorStatus.NEW);
+        // Check current session status and ignore if handling failed or finished before
+        Optional<SessionStatus> status = Optional.ofNullable(session.getStatus());
+        String operatorStatus = status.map(ResourceStatus::getOperatorStatus).orElse(OperatorStatus.NEW);
 
-            if (OperatorStatus.HANDLED.equals(operatorStatus)) {
-                LOGGER.trace(formatLogMessage(correlationId,
-                        "Session was successfully handled before and is skipped now. Session: " + session));
-                span.setTag("outcome", "already_handled");
-                    return true;
-            }
-            if (OperatorStatus.HANDLING.equals(operatorStatus)) {
-                LOGGER.warn(formatLogMessage(correlationId, "Session handling was interrupted. Setting to ERROR."));
-                client.sessions().updateStatus(correlationId, session, s -> {
-                    s.setOperatorStatus(OperatorStatus.ERROR);
-                    s.setOperatorMessage("Handling was unexpectedly interrupted. CorrelationId: " + correlationId);
-                });
-                span.setTag("outcome", "interrupted");
-                    return false;
-            }
-            if (OperatorStatus.ERROR.equals(operatorStatus)) {
-                LOGGER.warn(formatLogMessage(correlationId, "Session previously errored. Skipping."));
-                span.setTag("outcome", "previous_error");
-                    return false;
-            }
-
-            // Set status to handling
-            client.sessions().updateStatus(correlationId, session, s -> s.setOperatorStatus(OperatorStatus.HANDLING));
-
-            SessionSpec sessionSpec = session.getSpec();
-
-            // Find app definition
-            ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
-            String appDefinitionID = sessionSpec.getAppDefinition();
-            span.setTag("app_definition", appDefinitionID);
-            Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
-            if (appDefOpt.isEmpty()) {
-                LOGGER.error(formatLogMessage(correlationId,
-                        "No App Definition with name " + appDefinitionID + " found."));
-                setSessionError(session, correlationId, "App Definition not found.");
-                appDefSpan.setTag("outcome", "not_found");
-                Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
-                span.setTag("outcome", "appdef_not_found");
-                span.setStatus(SpanStatus.NOT_FOUND);
-                    return false;
-            }
-            AppDefinition appDef = appDefOpt.get();
-            AppDefinitionSpec appDefSpec = appDef.getSpec();
-            Tracing.finishSuccess(appDefSpan);
-
-            // Create labels
-            Map<String, String> labels = LabelsUtil.createSessionLabels(session, appDef);
-
-            // Check limits
-            ISpan limitsSpan = Tracing.childSpan(span, "lazy.check_limits", "Check instance and session limits");
-            if (hasMaxInstancesReached(appDef, session, correlationId)) {
-                setSessionError(session, correlationId, "Max instances reached.");
-                limitsSpan.setTag("outcome", "max_instances");
-                Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
-                span.setTag("outcome", "max_instances_reached");
-                    return false;
-            }
-            if (hasMaxSessionsReached(session, correlationId)) {
-                setSessionError(session, correlationId, "Max sessions reached.");
-                limitsSpan.setTag("outcome", "max_sessions");
-                Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
-                span.setTag("outcome", "max_sessions_reached");
-                    return false;
-            }
-            Tracing.finishSuccess(limitsSpan);
-
-            // Get ingress
-            ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_ingress", "Get ingress for app definition");
-            Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
-            if (ingressOpt.isEmpty()) {
-                setSessionError(session, correlationId, "Ingress not available.");
-                ingressSpan.setTag("outcome", "not_found");
-                Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
-                span.setTag("outcome", "ingress_not_found");
-                span.setStatus(SpanStatus.NOT_FOUND);
-                    return false;
-            }
-            Tracing.finishSuccess(ingressSpan);
-
-            syncSessionDataToWorkspace(session, correlationId);
-
-            // Check for existing service (idempotency)
-            List<Service> existingServices = K8sUtil.getExistingServices(
-                    client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
-            if (!existingServices.isEmpty()) {
-                LOGGER.warn(formatLogMessage(correlationId, "Service already exists for session."));
-                setSessionHandled(session, correlationId, "Service already exists.");
-                span.setTag("outcome", "idempotent_service_exists");
-                span.setStatus(SpanStatus.OK);
-                    return true;
-            }
-
-            // Create service
-            ISpan serviceSpan = Tracing.childSpan(span, "lazy.create_service", "Create service");
-            Optional<Service> serviceOpt = resourceFactory.createServiceForLazySession(
-                    session, appDef, labels, correlationId);
-            if (serviceOpt.isEmpty()) {
-                LOGGER.error(formatLogMessage(correlationId, "Unable to create service for session."));
-                setSessionError(session, correlationId, "Failed to create service.");
-                serviceSpan.setTag("outcome", "failed");
-                Tracing.finish(serviceSpan, SpanStatus.INTERNAL_ERROR);
-                span.setTag("outcome", "service_creation_failed");
-                span.setStatus(SpanStatus.INTERNAL_ERROR);
-                    return false;
-            }
-            Tracing.finishSuccess(serviceSpan);
-
-            // Create internal service
-            ISpan internalServiceSpan = Tracing.childSpan(span, "lazy.create_internal_service", "Create internal service");
-            Optional<Service> internalServiceOpt = resourceFactory.createInternalServiceForLazySession(
-                    session, appDef, labels, correlationId);
-            if (internalServiceOpt.isEmpty()) {
-                LOGGER.error(formatLogMessage(correlationId, "Unable to create internal service."));
-                setSessionError(session, correlationId, "Failed to create internal service.");
-                internalServiceSpan.setTag("outcome", "failed");
-                Tracing.finish(internalServiceSpan, SpanStatus.INTERNAL_ERROR);
-                span.setTag("outcome", "internal_service_failed");
-                span.setStatus(SpanStatus.INTERNAL_ERROR);
-                    return false;
-            }
-            Tracing.finishSuccess(internalServiceSpan);
-
-            // Create configmaps (if using Keycloak)
-            if (arguments.isUseKeycloak()) {
-                ISpan configMapSpan = Tracing.childSpan(span, "lazy.create_configmaps", "Create OAuth2 configmaps");
-                List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(
-                        client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
-                if (!existingConfigMaps.isEmpty()) {
-                    LOGGER.warn(formatLogMessage(correlationId, "ConfigMaps already exist for session."));
-                    setSessionHandled(session, correlationId, "ConfigMaps already exist.");
-                    configMapSpan.setTag("outcome", "already_exists");
-                    Tracing.finish(configMapSpan, SpanStatus.OK);
-                    span.setTag("outcome", "idempotent_configmaps_exist");
-                    span.setStatus(SpanStatus.OK);
-                            return true;
-                }
-                resourceFactory.createEmailConfigMapForLazySession(session, labels, correlationId);
-                resourceFactory.createProxyConfigMapForLazySession(session, appDef, labels, correlationId);
-                Tracing.finishSuccess(configMapSpan);
-            }
-
-            // Check for existing deployment (idempotency)
-            List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(
-                    client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
-            if (!existingDeployments.isEmpty()) {
-                LOGGER.warn(formatLogMessage(correlationId, "Deployment already exists for session."));
-                setSessionHandled(session, correlationId, "Deployment already exists.");
-                span.setTag("outcome", "idempotent_deployment_exists");
-                span.setStatus(SpanStatus.OK);
-                    return true;
-            }
-
-            // Create deployment
-            ISpan deploymentSpan = Tracing.childSpan(span, "lazy.create_deployment", "Create deployment");
-            Optional<String> storageName = getStorageName(session, correlationId);
-            deploymentSpan.setData("has_storage", storageName.isPresent());
-            resourceFactory.createDeploymentForLazySession(
-                    session, appDef, storageName, labels,
-                    deployment -> storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec)),
-                    correlationId);
-            Tracing.finishSuccess(deploymentSpan);
-
-            // Add ingress rule
-            ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_ingress_rule", "Add ingress rule");
-            String host;
-            try {
-                host = ingressManager.addRuleForLazySession(
-                        ingressOpt.get(), serviceOpt.get(), session, appDef, correlationId);
-                ingressRuleSpan.setData("host", host);
-                Tracing.finishSuccess(ingressRuleSpan);
-            } catch (KubernetesClientException e) {
-                LOGGER.error(formatLogMessage(correlationId, "Error while editing ingress"), e);
-                setSessionError(session, correlationId, "Failed to edit ingress.");
-                Tracing.finishError(ingressRuleSpan, e);
-                span.setTag("outcome", "ingress_rule_failed");
-                span.setStatus(SpanStatus.INTERNAL_ERROR);
-                    return false;
-            }
-
-            // Schedule async URL availability check (tracked in separate transaction: session.url_availability)
-            Sentry.addBreadcrumb("Scheduling URL availability check for " + host, "session");
-            AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId, span);
-
-            setSessionHandled(session, correlationId, null);
-            span.setTag("outcome", "success");
-            span.setStatus(SpanStatus.OK);
-            span.finish();
+        if (OperatorStatus.HANDLED.equals(operatorStatus)) {
+            LOGGER.trace(formatLogMessage(correlationId,
+                    "Session was successfully handled before and is skipped now. Session: " + session));
+            span.setTag("outcome", "already_handled");
             return true;
-
-        } catch (Exception e) {
-            span.setThrowable(e);
-            span.setTag("outcome", "error");
-            span.setStatus(SpanStatus.INTERNAL_ERROR);
-            Sentry.captureException(e);
-            span.finish();
-            throw e;
         }
+        if (OperatorStatus.HANDLING.equals(operatorStatus)) {
+            LOGGER.warn(formatLogMessage(correlationId, "Session handling was interrupted. Setting to ERROR."));
+            client.sessions().updateStatus(correlationId, session, s -> {
+                s.setOperatorStatus(OperatorStatus.ERROR);
+                s.setOperatorMessage("Handling was unexpectedly interrupted. CorrelationId: " + correlationId);
+            });
+            span.setTag("outcome", "interrupted");
+            return false;
+        }
+        if (OperatorStatus.ERROR.equals(operatorStatus)) {
+            LOGGER.warn(formatLogMessage(correlationId, "Session previously errored. Skipping."));
+            span.setTag("outcome", "previous_error");
+            return false;
+        }
+
+        // Set status to handling
+        client.sessions().updateStatus(correlationId, session, s -> s.setOperatorStatus(OperatorStatus.HANDLING));
+
+        SessionSpec sessionSpec = session.getSpec();
+
+        // Find app definition
+        ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
+        String appDefinitionID = sessionSpec.getAppDefinition();
+        span.setTag("app_definition", appDefinitionID);
+        Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
+        if (appDefOpt.isEmpty()) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "No App Definition with name " + appDefinitionID + " found."));
+            setSessionError(session, correlationId, "App Definition not found.");
+            appDefSpan.setTag("outcome", "not_found");
+            Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
+            span.setTag("outcome", "appdef_not_found");
+            span.setStatus(SpanStatus.NOT_FOUND);
+            return false;
+        }
+        AppDefinition appDef = appDefOpt.get();
+        AppDefinitionSpec appDefSpec = appDef.getSpec();
+        Tracing.finishSuccess(appDefSpan);
+
+        // Create labels
+        Map<String, String> labels = LabelsUtil.createSessionLabels(session, appDef);
+
+        // Check limits
+        ISpan limitsSpan = Tracing.childSpan(span, "lazy.check_limits", "Check instance and session limits");
+        if (hasMaxInstancesReached(appDef, session, correlationId)) {
+            setSessionError(session, correlationId, "Max instances reached.");
+            limitsSpan.setTag("outcome", "max_instances");
+            Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
+            span.setTag("outcome", "max_instances_reached");
+            return false;
+        }
+        if (hasMaxSessionsReached(session, correlationId)) {
+            setSessionError(session, correlationId, "Max sessions reached.");
+            limitsSpan.setTag("outcome", "max_sessions");
+            Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
+            span.setTag("outcome", "max_sessions_reached");
+            return false;
+        }
+        Tracing.finishSuccess(limitsSpan);
+
+        // Get ingress
+        ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_ingress", "Get ingress for app definition");
+        Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
+        if (ingressOpt.isEmpty()) {
+            setSessionError(session, correlationId, "Ingress not available.");
+            ingressSpan.setTag("outcome", "not_found");
+            Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
+            span.setTag("outcome", "ingress_not_found");
+            span.setStatus(SpanStatus.NOT_FOUND);
+            return false;
+        }
+        Tracing.finishSuccess(ingressSpan);
+
+        syncSessionDataToWorkspace(session, correlationId);
+
+        // Check for existing service (idempotency)
+        List<Service> existingServices = K8sUtil.getExistingServices(
+                client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
+        if (!existingServices.isEmpty()) {
+            LOGGER.warn(formatLogMessage(correlationId, "Service already exists for session."));
+            setSessionHandled(session, correlationId, "Service already exists.");
+            span.setTag("outcome", "idempotent_service_exists");
+            span.setStatus(SpanStatus.OK);
+            return true;
+        }
+
+        // Create service
+        ISpan serviceSpan = Tracing.childSpan(span, "lazy.create_service", "Create service");
+        Optional<Service> serviceOpt = resourceFactory.createServiceForLazySession(
+                session, appDef, labels, correlationId);
+        if (serviceOpt.isEmpty()) {
+            LOGGER.error(formatLogMessage(correlationId, "Unable to create service for session."));
+            setSessionError(session, correlationId, "Failed to create service.");
+            serviceSpan.setTag("outcome", "failed");
+            Tracing.finish(serviceSpan, SpanStatus.INTERNAL_ERROR);
+            span.setTag("outcome", "service_creation_failed");
+            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            return false;
+        }
+        Tracing.finishSuccess(serviceSpan);
+
+        // Create internal service
+        ISpan internalServiceSpan = Tracing.childSpan(span, "lazy.create_internal_service", "Create internal service");
+        Optional<Service> internalServiceOpt = resourceFactory.createInternalServiceForLazySession(
+                session, appDef, labels, correlationId);
+        if (internalServiceOpt.isEmpty()) {
+            LOGGER.error(formatLogMessage(correlationId, "Unable to create internal service."));
+            setSessionError(session, correlationId, "Failed to create internal service.");
+            internalServiceSpan.setTag("outcome", "failed");
+            Tracing.finish(internalServiceSpan, SpanStatus.INTERNAL_ERROR);
+            span.setTag("outcome", "internal_service_failed");
+            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            return false;
+        }
+        Tracing.finishSuccess(internalServiceSpan);
+
+        // Create configmaps (if using Keycloak)
+        if (arguments.isUseKeycloak()) {
+            ISpan configMapSpan = Tracing.childSpan(span, "lazy.create_configmaps", "Create OAuth2 configmaps");
+            List<ConfigMap> existingConfigMaps = K8sUtil.getExistingConfigMaps(
+                    client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
+            if (!existingConfigMaps.isEmpty()) {
+                LOGGER.warn(formatLogMessage(correlationId, "ConfigMaps already exist for session."));
+                setSessionHandled(session, correlationId, "ConfigMaps already exist.");
+                configMapSpan.setTag("outcome", "already_exists");
+                Tracing.finish(configMapSpan, SpanStatus.OK);
+                span.setTag("outcome", "idempotent_configmaps_exist");
+                span.setStatus(SpanStatus.OK);
+                return true;
+            }
+            resourceFactory.createEmailConfigMapForLazySession(session, labels, correlationId);
+            resourceFactory.createProxyConfigMapForLazySession(session, appDef, labels, correlationId);
+            Tracing.finishSuccess(configMapSpan);
+        }
+
+        // Check for existing deployment (idempotency)
+        List<Deployment> existingDeployments = K8sUtil.getExistingDeployments(
+                client.kubernetes(), client.namespace(), sessionResourceName, sessionResourceUID);
+        if (!existingDeployments.isEmpty()) {
+            LOGGER.warn(formatLogMessage(correlationId, "Deployment already exists for session."));
+            setSessionHandled(session, correlationId, "Deployment already exists.");
+            span.setTag("outcome", "idempotent_deployment_exists");
+            span.setStatus(SpanStatus.OK);
+            return true;
+        }
+
+        // Create deployment
+        ISpan deploymentSpan = Tracing.childSpan(span, "lazy.create_deployment", "Create deployment");
+        Optional<String> storageName = getStorageName(session, correlationId);
+        deploymentSpan.setData("has_storage", storageName.isPresent());
+        resourceFactory.createDeploymentForLazySession(
+                session, appDef, storageName, labels,
+                deployment -> storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec)),
+                correlationId);
+        Tracing.finishSuccess(deploymentSpan);
+
+        // Add ingress rule
+        ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_ingress_rule", "Add ingress rule");
+        String host;
+        try {
+            host = ingressManager.addRuleForLazySession(
+                    ingressOpt.get(), serviceOpt.get(), session, appDef, correlationId);
+            ingressRuleSpan.setData("host", host);
+            Tracing.finishSuccess(ingressRuleSpan);
+        } catch (KubernetesClientException e) {
+            LOGGER.error(formatLogMessage(correlationId, "Error while editing ingress"), e);
+            setSessionError(session, correlationId, "Failed to edit ingress.");
+            Tracing.finishError(ingressRuleSpan, e);
+            span.setTag("outcome", "ingress_rule_failed");
+            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            return false;
+        }
+
+        // Schedule async URL availability check (tracked in separate transaction:
+        // session.url_availability)
+        Sentry.addBreadcrumb("Scheduling URL availability check for " + host, "session");
+        AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId,
+                span);
+
+        setSessionHandled(session, correlationId, null);
+        span.setTag("outcome", "success");
+        span.setStatus(SpanStatus.OK);
+        span.finish();
+        return true;
     }
 
     @Override
     public synchronized boolean sessionDeleted(Session session, String correlationId, ISpan parentSpan) {
-        try {
-            return doSessionDeleted(session, correlationId, parentSpan);
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId, "Kubernetes API error while deleting session"), e);
-            return false;
-        } catch (Exception e) {
-            LOGGER.error(formatLogMessage(correlationId, "Unexpected error while deleting session"), e);
-            return false;
-        }
+        return doSessionDeleted(session, correlationId, parentSpan);
     }
 
     protected boolean doSessionDeleted(Session session, String correlationId, ISpan span) {
@@ -341,57 +325,49 @@ public class LazySessionHandler implements SessionHandler {
         span.setTag("app_definition", appDefinitionID);
         span.setData("correlation_id", correlationId);
 
-        try {
-            ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
-            Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
-            if (appDefOpt.isEmpty()) {
-                LOGGER.error(formatLogMessage(correlationId,
-                        "No App Definition found. Cannot clean up ingress for session " + sessionSpec.getName()));
-                appDefSpan.setTag("outcome", "not_found");
-                Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
-                span.setTag("outcome", "appdef_not_found");
-                span.setStatus(SpanStatus.NOT_FOUND);
-                return false;
-            }
-            AppDefinition appDef = appDefOpt.get();
-            Tracing.finishSuccess(appDefSpan);
-
-            ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_ingress", "Get ingress for cleanup");
-            Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
-            if (ingressOpt.isEmpty()) {
-                LOGGER.error(formatLogMessage(correlationId, "No Ingress found for app definition."));
-                ingressSpan.setTag("outcome", "not_found");
-                Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
-                span.setTag("outcome", "ingress_not_found");
-                span.setStatus(SpanStatus.NOT_FOUND);
-                return false;
-            }
-            Tracing.finishSuccess(ingressSpan);
-
-            // Remove ingress rules
-            ISpan removeRulesSpan = Tracing.childSpan(span, "lazy.remove_ingress_rules", "Remove ingress rules");
-            boolean success = ingressManager.removeRulesForLazySession(
-                    ingressOpt.get(), session, appDef, correlationId);
-
-            if (!success) {
-                LOGGER.error(formatLogMessage(correlationId, "Failed to remove ingress rules for session"));
-                removeRulesSpan.setTag("outcome", "failed");
-                Tracing.finish(removeRulesSpan, SpanStatus.INTERNAL_ERROR);
-                span.setTag("outcome", "remove_rules_failed");
-                return false;
-            }
-            Tracing.finishSuccess(removeRulesSpan);
-
-            LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up ingress rules for session"));
-            span.setTag("outcome", "success");
-            return true;
-
-        } catch (Exception e) {
-            span.setThrowable(e);
-            span.setTag("outcome", "error");
-            Sentry.captureException(e);
-            throw e;
+        ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
+        Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
+        if (appDefOpt.isEmpty()) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "No App Definition found. Cannot clean up ingress for session " + sessionSpec.getName()));
+            appDefSpan.setTag("outcome", "not_found");
+            Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
+            span.setTag("outcome", "appdef_not_found");
+            span.setStatus(SpanStatus.NOT_FOUND);
+            return false;
         }
+        AppDefinition appDef = appDefOpt.get();
+        Tracing.finishSuccess(appDefSpan);
+
+        ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_ingress", "Get ingress for cleanup");
+        Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
+        if (ingressOpt.isEmpty()) {
+            LOGGER.error(formatLogMessage(correlationId, "No Ingress found for app definition."));
+            ingressSpan.setTag("outcome", "not_found");
+            Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
+            span.setTag("outcome", "ingress_not_found");
+            span.setStatus(SpanStatus.NOT_FOUND);
+            return false;
+        }
+        Tracing.finishSuccess(ingressSpan);
+
+        // Remove ingress rules
+        ISpan removeRulesSpan = Tracing.childSpan(span, "lazy.remove_ingress_rules", "Remove ingress rules");
+        boolean success = ingressManager.removeRulesForLazySession(
+                ingressOpt.get(), session, appDef, correlationId);
+
+        if (!success) {
+            LOGGER.error(formatLogMessage(correlationId, "Failed to remove ingress rules for session"));
+            removeRulesSpan.setTag("outcome", "failed");
+            Tracing.finish(removeRulesSpan, SpanStatus.INTERNAL_ERROR);
+            span.setTag("outcome", "remove_rules_failed");
+            return false;
+        }
+        Tracing.finishSuccess(removeRulesSpan);
+
+        LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up ingress rules for session"));
+        span.setTag("outcome", "success");
+        return true;
     }
 
     // ========== Helper Methods ==========
@@ -463,7 +439,8 @@ public class LazySessionHandler implements SessionHandler {
         Optional<Workspace> workspace = client.workspaces().get(session.getSpec().getWorkspace());
         if (workspace.isEmpty()) {
             LOGGER.info(formatLogMessage(correlationId,
-                    "No workspace with name " + session.getSpec().getWorkspace() + " found for session " + session.getSpec().getName()));
+                    "No workspace with name " + session.getSpec().getWorkspace() + " found for session "
+                            + session.getSpec().getName()));
             return Optional.empty();
         }
         if (!session.getSpec().getUser().equals(workspace.get().getSpec().getUser())) {

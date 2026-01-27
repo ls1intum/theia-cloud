@@ -19,6 +19,7 @@ jobs:
     outputs:
       base_tag: ${{ steps.set-tag.outputs.base_tag }}
       sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
+      cache_tag: ${{ steps.set-tag.outputs.cache_tag }}
     steps:
       - name: Checkout for SHA access
         uses: actions/checkout@v4
@@ -30,12 +31,15 @@ jobs:
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
+            CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
           else
             BASE_TAG="latest"
+            CACHE_TAG="build-cache"
           fi
           
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "cache_tag=${CACHE_TAG}" >> "$GITHUB_OUTPUT"
 
   build-and-push-landing-page:
     needs: determine-tag
@@ -47,6 +51,10 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets: inherit
 
   build-and-push-operator:
@@ -59,6 +67,10 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -73,6 +85,10 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/service:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

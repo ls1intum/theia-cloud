@@ -54,6 +54,7 @@ import io.sentry.Sentry;
 import io.sentry.SpanStatus;
 import io.sentry.okhttp.SentryOkHttpEventListener;
 import io.sentry.okhttp.SentryOkHttpInterceptor;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 public class MonitorActivityTracker implements OperatorPlugin {
 
@@ -89,7 +90,7 @@ public class MonitorActivityTracker implements OperatorPlugin {
     }
 
     protected void pingAllSessions() {
-        ITransaction transaction = Sentry.startTransaction("monitor.activity-check", "monitor");
+        ITransaction transaction = Tracing.startTransaction("monitor.activity-check", "monitor");
         try {
             // Only look at handled sessions (handled sessions have a lastActivity)
             List<Session> sessions = resourceClient.sessions().list().stream()

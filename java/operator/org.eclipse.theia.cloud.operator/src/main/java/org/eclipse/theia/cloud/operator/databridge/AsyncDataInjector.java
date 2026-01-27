@@ -18,9 +18,8 @@ import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
 import io.sentry.ISpan;
-import io.sentry.ITransaction;
-import io.sentry.Sentry;
 import io.sentry.SpanStatus;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 /**
  * Handles asynchronous data injection into sessions via the data bridge. Polls the health endpoint until the data
@@ -62,18 +61,18 @@ public class AsyncDataInjector {
         LOGGER.info(formatLogMessage(correlationId, "Scheduling async data injection for session: " + sessionName));
 
         scheduler.submit(() -> {
-            // Start a new transaction for the async operation
-            ITransaction tx = Sentry.startTransaction("databridge.inject", "databridge");
-            tx.setTag("session.name", sessionName);
-            tx.setTag("app_definition", appDef);
-            tx.setData("correlation_id", correlationId);
-            tx.setData("env_var_count", envVarCount);
+            // Start a child span for the async operation
+            ISpan span = Tracing.childSpan("databridge.inject", "databridge");
+            span.setTag("session.name", sessionName);
+            span.setTag("app_definition", appDef);
+            span.setData("correlation_id", correlationId);
+            span.setData("env_var_count", envVarCount);
 
-            pollHealthThenInject(tx, session, envVars, correlationId, 0);
+            pollHealthThenInject(span, session, envVars, correlationId, 0);
         });
     }
 
-    private void pollHealthThenInject(ITransaction tx, Session session, Map<String, String> envVars,
+    private void pollHealthThenInject(ISpan span, Session session, Map<String, String> envVars,
             String correlationId, int attempt) {
         String sessionName = session.getSpec().getName();
 
@@ -81,31 +80,29 @@ public class AsyncDataInjector {
             LOGGER.error(formatLogMessage(correlationId,
                     "Data bridge not ready after " + MAX_HEALTH_CHECKS + "s for session: " + sessionName));
 
-            tx.setTag("outcome", "timeout");
-            tx.setData("health_check_attempts", attempt);
-            tx.setStatus(SpanStatus.DEADLINE_EXCEEDED);
-            tx.finish();
+            span.setTag("outcome", "timeout");
+            span.setData("health_check_attempts", attempt);
+            Tracing.finish(span, SpanStatus.DEADLINE_EXCEEDED);
             return;
         }
 
         // Check if data bridge is healthy
-        ISpan healthSpan = tx.startChild("databridge.health_check", "Health check attempt " + (attempt + 1));
+        ISpan healthSpan = Tracing.childSpan(span, "databridge.health_check", "Health check attempt " + (attempt + 1));
         healthSpan.setData("attempt", attempt + 1);
 
         boolean healthy = dataBridgeClient.healthCheck(sessionName, correlationId);
         healthSpan.setTag("healthy", String.valueOf(healthy));
-        healthSpan.setStatus(healthy ? SpanStatus.OK : SpanStatus.UNAVAILABLE);
-        healthSpan.finish();
+        Tracing.finish(healthSpan, healthy ? SpanStatus.OK : SpanStatus.UNAVAILABLE);
 
         if (healthy) {
             // Ready - inject data once
             LOGGER.info(formatLogMessage(correlationId,
                     "Data bridge ready for session: " + sessionName + " (attempt " + (attempt + 1) + ")"));
 
-            tx.setData("health_check_attempts", attempt + 1);
-            tx.setData("time_to_ready_ms", (attempt + 1) * HEALTH_CHECK_INTERVAL_MS);
+            span.setData("health_check_attempts", attempt + 1);
+            span.setData("time_to_ready_ms", (attempt + 1) * HEALTH_CHECK_INTERVAL_MS);
 
-            ISpan injectSpan = tx.startChild("databridge.inject_data", "Inject environment data");
+            ISpan injectSpan = Tracing.childSpan(span, "databridge.inject_data", "Inject environment data");
             injectSpan.setData("env_var_count", envVars.size());
 
             try {
@@ -115,42 +112,36 @@ public class AsyncDataInjector {
                     LOGGER.error(formatLogMessage(correlationId,
                             "Data injection failed - no response for session: " + sessionName));
                     injectSpan.setTag("outcome", "no_response");
-                    injectSpan.setStatus(SpanStatus.INTERNAL_ERROR);
-                    tx.setTag("outcome", "injection_failed");
-                    tx.setTag("failure.reason", "no_response");
-                    tx.setStatus(SpanStatus.INTERNAL_ERROR);
+                    Tracing.finish(injectSpan, SpanStatus.INTERNAL_ERROR);
+                    span.setTag("outcome", "injection_failed");
+                    span.setTag("failure.reason", "no_response");
+                    Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 } else if (!response.get().isSuccess()) {
                     String error = response.get().getError();
                     LOGGER.error(formatLogMessage(correlationId,
                             "Data injection failed for session: " + sessionName + " - " + error));
                     injectSpan.setTag("outcome", "error");
                     injectSpan.setData("error_message", error);
-                    injectSpan.setStatus(SpanStatus.INTERNAL_ERROR);
-                    tx.setTag("outcome", "injection_failed");
-                    tx.setTag("failure.reason", "api_error");
-                    tx.setData("error_message", error);
-                    tx.setStatus(SpanStatus.INTERNAL_ERROR);
+                    Tracing.finish(injectSpan, SpanStatus.INTERNAL_ERROR);
+                    span.setTag("outcome", "injection_failed");
+                    span.setTag("failure.reason", "api_error");
+                    span.setData("error_message", error);
+                    Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 } else {
                     LOGGER.info(
                             formatLogMessage(correlationId, "Data injected successfully for session: " + sessionName));
                     injectSpan.setTag("outcome", "success");
-                    injectSpan.setStatus(SpanStatus.OK);
-                    tx.setTag("outcome", "success");
-                    tx.setStatus(SpanStatus.OK);
+                    Tracing.finishSuccess(injectSpan);
+                    span.setTag("outcome", "success");
+                    Tracing.finishSuccess(span);
                 }
             } catch (Exception e) {
                 LOGGER.error(formatLogMessage(correlationId, "Exception during data injection"), e);
                 injectSpan.setTag("outcome", "exception");
-                injectSpan.setThrowable(e);
-                injectSpan.setStatus(SpanStatus.INTERNAL_ERROR);
-                tx.setTag("outcome", "injection_failed");
-                tx.setTag("failure.reason", "exception");
-                tx.setThrowable(e);
-                tx.setStatus(SpanStatus.INTERNAL_ERROR);
-                Sentry.captureException(e);
-            } finally {
-                injectSpan.finish();
-                tx.finish();
+                Tracing.finishError(injectSpan, e);
+                span.setTag("outcome", "injection_failed");
+                span.setTag("failure.reason", "exception");
+                Tracing.finishError(span, e);
             }
             return;
         }
@@ -161,7 +152,7 @@ public class AsyncDataInjector {
                     "Data bridge not ready yet for session: " + sessionName + ", polling..."));
         }
 
-        scheduler.schedule(() -> pollHealthThenInject(tx, session, envVars, correlationId, attempt + 1),
+        scheduler.schedule(() -> pollHealthThenInject(span, session, envVars, correlationId, attempt + 1),
                 HEALTH_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 

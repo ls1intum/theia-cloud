@@ -43,7 +43,6 @@ import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.PodResource;
 import io.sentry.ISpan;
-import io.sentry.Sentry;
 import io.sentry.SpanStatus;
 
 /**
@@ -146,10 +145,7 @@ public class PrewarmedResourcePool {
      */
     public boolean ensureCapacity(AppDefinition appDef, int minInstances, String correlationId) {
         String appDefName = appDef.getSpec().getName();
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null
-                ? parentSpan.startChild("pool.ensure_capacity", "Ensure pool capacity")
-                : Sentry.startTransaction("pool.ensure_capacity", "pool");
+        ISpan span = Tracing.childSpan("pool.ensure_capacity", "Ensure pool capacity");
 
         span.setTag("app_definition", appDefName);
         span.setData("min_instances", minInstances);
@@ -287,9 +283,7 @@ public class PrewarmedResourcePool {
      */
     public boolean reconcile(AppDefinition appDef, int targetInstances, String correlationId) {
         String appDefName = appDef.getSpec().getName();
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null ? parentSpan.startChild("pool.reconcile", "Reconcile pool")
-                : Sentry.startTransaction("pool.reconcile", "pool");
+        ISpan span = Tracing.childSpan("pool.reconcile", "Reconcile pool");
 
         span.setTag("app_definition", appDefName);
         span.setData("target_instances", targetInstances);
@@ -496,10 +490,7 @@ public class PrewarmedResourcePool {
         int minInstances = appDef.getSpec().getMinInstances();
         long currentGeneration = appDef.getMetadata().getGeneration();
 
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null
-                ? parentSpan.startChild("pool.reconcile_instance", "Reconcile instance " + instanceId)
-                : Sentry.startTransaction("pool.reconcile_instance", "pool");
+        ISpan span = Tracing.childSpan("pool.reconcile_instance", "Reconcile instance " + instanceId);
 
         span.setTag("app_definition", appDefName);
         span.setData("instance_id", instanceId);
@@ -667,9 +658,7 @@ public class PrewarmedResourcePool {
      */
     public boolean releaseAll(AppDefinition appDef, String correlationId) {
         String appDefName = appDef.getSpec().getName();
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null ? parentSpan.startChild("pool.release_all", "Release all pool resources")
-                : Sentry.startTransaction("pool.release_all", "pool");
+        ISpan span = Tracing.childSpan("pool.release_all", "Release all pool resources");
 
         span.setTag("app_definition", appDefName);
 
@@ -729,9 +718,7 @@ public class PrewarmedResourcePool {
         String sessionName = session.getSpec().getName();
         String appDefName = appDef.getSpec().getName();
 
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null ? parentSpan.startChild("pool.reserve", "Reserve pool instance")
-                : Sentry.startTransaction("pool.reserve", "pool");
+        ISpan span = Tracing.childSpan("pool.reserve", "Reserve pool instance");
 
         span.setTag("app_definition", appDefName);
         span.setData("session_name", sessionName);
@@ -874,9 +861,7 @@ public class PrewarmedResourcePool {
     public boolean completeSessionSetup(Session session, AppDefinition appDef, PoolInstance instance,
             String correlationId) {
 
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null ? parentSpan.startChild("pool.complete_setup", "Complete session setup")
-                : Sentry.startTransaction("pool.complete_setup", "pool");
+        ISpan span = Tracing.childSpan("pool.complete_setup", "Complete session setup");
 
         span.setData("session_name", session.getSpec().getName());
         span.setData("instance_id", instance.getInstanceId());
@@ -954,9 +939,7 @@ public class PrewarmedResourcePool {
         String sessionName = session.getSpec().getName();
         String appDefName = appDef.getSpec().getName();
 
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null ? parentSpan.startChild("pool.release_instance", "Release pool instance")
-                : Sentry.startTransaction("pool.release_instance", "pool");
+        ISpan span = Tracing.childSpan("pool.release_instance", "Release pool instance");
 
         span.setTag("app_definition", appDefName);
         span.setData("session_name", sessionName);

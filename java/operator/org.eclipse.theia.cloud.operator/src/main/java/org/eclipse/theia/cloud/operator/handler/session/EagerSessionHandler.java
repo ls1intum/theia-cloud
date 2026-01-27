@@ -204,7 +204,7 @@ public class EagerSessionHandler implements SessionHandler {
 
             // Schedule async URL availability check (tracked in separate transaction: session.url_availability)
             Sentry.addBreadcrumb("Scheduling URL availability check for " + host, "session");
-            AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId);
+            AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId, span);
 
             span.setData("instance_id", instance.getInstanceId());
             Tracing.finishSuccess(span);

@@ -177,11 +177,6 @@ public class EagerStartAppDefinitionAddedHandler implements AppDefinitionHandler
             return success;
 
         } catch (Exception e) {
-            Sentry.withScope(scope -> {
-                scope.setTag("operation", "appdef.modified");
-                scope.setTag("correlation_id", correlationId);
-                Sentry.captureException(e);
-            });
             Tracing.finishError(tx, e);
             throw e;
         }

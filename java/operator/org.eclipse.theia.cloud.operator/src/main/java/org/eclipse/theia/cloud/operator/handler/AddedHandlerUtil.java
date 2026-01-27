@@ -64,9 +64,8 @@ import io.fabric8.kubernetes.api.model.SecretEnvSource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.sentry.ISpan;
-import io.sentry.ITransaction;
-import io.sentry.Sentry;
 import io.sentry.SpanStatus;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 public final class AddedHandlerUtil {
 
@@ -135,17 +134,17 @@ public final class AddedHandlerUtil {
     }
 
     public static void updateSessionURLAsync(SessionResourceClient sessions, Session session, String namespace,
-            String url, String correlationId) {
+            String url, String correlationId, ISpan parentSpan) {
         String sessionName = session.getSpec().getName();
         String appDef = session.getSpec().getAppDefinition();
 
         EXECUTOR.execute(() -> {
-            // Start a new transaction for the async URL availability check
-            ITransaction tx = Sentry.startTransaction("session.url_availability", "session");
-            tx.setTag("session.name", sessionName);
-            tx.setTag("app_definition", appDef);
-            tx.setData("correlation_id", correlationId);
-            tx.setData("url", url);
+            // Start a child span for the async URL availability check
+            ISpan span = Tracing.childSpan(parentSpan, "session.url_availability", "session");
+            span.setTag("session.name", sessionName);
+            span.setTag("app_definition", appDef);
+            span.setData("correlation_id", correlationId);
+            span.setData("url", url);
 
             long startTime = System.currentTimeMillis();
             boolean updateURL = false;
@@ -221,27 +220,22 @@ public final class AddedHandlerUtil {
                     if (updateURL) {
                         LOGGER.info(formatLogMessage(correlationId, url + " is available."));
 
-                        ISpan updateSpan = tx.startChild("session.update_status", "Update session URL status");
+                        ISpan updateSpan = Tracing.childSpan(span, "session.update_status", "Update session URL status");
                         try {
                             sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
-                            updateSpan.setStatus(SpanStatus.OK);
+                            Tracing.finishSuccess(updateSpan);
                         } catch (Exception e) {
-                            updateSpan.setThrowable(e);
-                            updateSpan.setStatus(SpanStatus.INTERNAL_ERROR);
-                            Sentry.captureException(e);
-                        } finally {
-                            updateSpan.finish();
+                            Tracing.finishError(updateSpan, e);
                         }
 
                         LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));
 
                         long duration = System.currentTimeMillis() - startTime;
-                        tx.setTag("outcome", "success");
-                        tx.setData("attempts", i);
-                        tx.setData("time_to_available_ms", duration);
-                        tx.setData("final_response_code", code);
-                        tx.setStatus(SpanStatus.OK);
-                        tx.finish();
+                        span.setTag("outcome", "success");
+                        span.setData("attempts", i);
+                        span.setData("time_to_available_ms", duration);
+                        span.setData("final_response_code", code);
+                        Tracing.finishSuccess(span);
                         return;
                     } else {
                         LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
@@ -250,22 +244,18 @@ public final class AddedHandlerUtil {
 
                 // Exhausted all attempts
                 long duration = System.currentTimeMillis() - startTime;
-                tx.setTag("outcome", "timeout");
-                tx.setData("attempts", 100);
-                tx.setData("duration_ms", duration);
-                tx.setData("last_response_code", lastResponseCode);
+                span.setTag("outcome", "timeout");
+                span.setData("attempts", 100);
+                span.setData("duration_ms", duration);
+                span.setData("last_response_code", lastResponseCode);
                 if (failureReason != null) {
-                    tx.setTag("failure.reason", failureReason);
+                    span.setTag("failure.reason", failureReason);
                 }
-                tx.setStatus(SpanStatus.DEADLINE_EXCEEDED);
-                tx.finish();
+                Tracing.finish(span, SpanStatus.DEADLINE_EXCEEDED);
 
             } catch (Exception e) {
-                tx.setTag("outcome", "error");
-                tx.setThrowable(e);
-                tx.setStatus(SpanStatus.INTERNAL_ERROR);
-                Sentry.captureException(e);
-                tx.finish();
+                span.setTag("outcome", "error");
+                Tracing.finishError(span, e);
             }
         });
     }

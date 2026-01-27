@@ -14,30 +14,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  determine-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      base_tag: ${{ steps.set-tag.outputs.base_tag }}
+      sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
+    steps:
+      - name: Checkout for SHA access
+        uses: actions/checkout@v4
+
+      - name: Set tags
+        id: set-tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_TAG="pr-${{ github.event.pull_request.number }}"
+          else
+            BASE_TAG="latest"
+          fi
+          
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
   build-and-push-landing-page:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
     secrets: inherit
 
   build-and-push-operator:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/operator/Dockerfile
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
 
   build-and-push-service:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/service/Dockerfile
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

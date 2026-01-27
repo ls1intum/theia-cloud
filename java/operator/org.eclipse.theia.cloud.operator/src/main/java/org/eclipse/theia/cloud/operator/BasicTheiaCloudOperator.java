@@ -198,9 +198,9 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         try {
             // Start transaction: continue trace if context exists, otherwise start new
             if (traceContext.isPresent()) {
-                String operation = "session." + action.name().toLowerCase();
-                String description = action.name() + " session " + session.getSpec().getName();
-                tx = (ITransaction) Tracing.continueTrace(traceContext.get(), operation, description);
+                String name = "session." + action.name().toLowerCase();
+                String operation = action.name() + " session " + session.getSpec().getName();
+                tx = (ITransaction) Tracing.continueTrace(traceContext.get(), name, operation);
             } else {
                 // No trace context - start new transaction (backward compatibility)
                 tx = Tracing.startTransaction("session." + action.name().toLowerCase(), "session");

@@ -73,7 +73,7 @@ public final class Tracing {
      * - The Operator extracts the context and continues the same trace
      * - Both transactions appear connected in Sentry's trace view
      */
-    public static ISpan continueTrace(TraceContext context, String operation, String description) {
+    public static ISpan continueTrace(TraceContext context, String name, String operation) {
         // Use Sentry.continueTrace() to properly parse and store trace context
         TransactionContext txContext = Sentry.continueTrace(
             context.getSentryTrace(), 
@@ -87,13 +87,13 @@ public final class Tracing {
             
             // Start transaction with the continued context
             ITransaction tx = Sentry.startTransaction(txContext, options);
+            tx.setName(name);
             tx.setOperation(operation);
-            tx.setDescription(description);
             return tx;
         }
 
         // Fallback: if continuation fails, start new transaction with reference tags
-        ITransaction tx = Sentry.startTransaction(operation, description);
+        ITransaction tx = Sentry.startTransaction(name, operation);
         return tx;
     }
 

@@ -49,11 +49,12 @@ public class AsyncDataInjector {
      * Schedules asynchronous data injection for a session. Polls the health endpoint until ready, then injects data
      * once.
      * 
+     * @param parentSpan    The parent span to create a child span from for tracing
      * @param session       The session to inject data into
      * @param envVars       The environment variables to inject
      * @param correlationId For logging/tracing
      */
-    public void scheduleInjection(Session session, Map<String, String> envVars, String correlationId) {
+    public void scheduleInjection(ISpan parentSpan, Session session, Map<String, String> envVars, String correlationId) {
         String sessionName = session.getSpec().getName();
         String appDef = session.getSpec().getAppDefinition();
         int envVarCount = envVars.size();
@@ -62,7 +63,7 @@ public class AsyncDataInjector {
 
         scheduler.submit(() -> {
             // Start a child span for the async operation
-            ISpan span = Tracing.childSpan("databridge.inject", "databridge");
+            ISpan span = Tracing.childSpan(parentSpan, "databridge.inject", "databridge");
             span.setTag("session.name", sessionName);
             span.setTag("app_definition", appDef);
             span.setData("correlation_id", correlationId);
@@ -72,7 +73,16 @@ public class AsyncDataInjector {
         });
     }
 
-    private void pollHealthThenInject(ISpan span, Session session, Map<String, String> envVars,
+    /**
+     * Polls the health endpoint and injects data when ready. Recursively schedules itself for retries.
+     * 
+     * @param parentSpan The parent span from scheduleInjection - all health checks are siblings under this span
+     * @param session The session to inject data into
+     * @param envVars The environment variables to inject
+     * @param correlationId For logging/tracing
+     * @param attempt The current attempt number (0-indexed)
+     */
+    private void pollHealthThenInject(ISpan parentSpan, Session session, Map<String, String> envVars,
             String correlationId, int attempt) {
         String sessionName = session.getSpec().getName();
 
@@ -80,14 +90,14 @@ public class AsyncDataInjector {
             LOGGER.error(formatLogMessage(correlationId,
                     "Data bridge not ready after " + MAX_HEALTH_CHECKS + "s for session: " + sessionName));
 
-            span.setTag("outcome", "timeout");
-            span.setData("health_check_attempts", attempt);
-            Tracing.finish(span, SpanStatus.DEADLINE_EXCEEDED);
+            parentSpan.setTag("outcome", "timeout");
+            parentSpan.setData("health_check_attempts", attempt);
+            Tracing.finish(parentSpan, SpanStatus.DEADLINE_EXCEEDED);
             return;
         }
 
-        // Check if data bridge is healthy
-        ISpan healthSpan = Tracing.childSpan(span, "databridge.health_check", "Health check attempt " + (attempt + 1));
+        // Check if data bridge is healthy - each attempt is a sibling span under parentSpan
+        ISpan healthSpan = Tracing.childSpan(parentSpan, "databridge.health_check", "Health check attempt " + (attempt + 1));
         healthSpan.setData("attempt", attempt + 1);
 
         boolean healthy = dataBridgeClient.healthCheck(sessionName, correlationId);
@@ -99,10 +109,10 @@ public class AsyncDataInjector {
             LOGGER.info(formatLogMessage(correlationId,
                     "Data bridge ready for session: " + sessionName + " (attempt " + (attempt + 1) + ")"));
 
-            span.setData("health_check_attempts", attempt + 1);
-            span.setData("time_to_ready_ms", (attempt + 1) * HEALTH_CHECK_INTERVAL_MS);
+            parentSpan.setData("health_check_attempts", attempt + 1);
+            parentSpan.setData("time_to_ready_ms", (attempt + 1) * HEALTH_CHECK_INTERVAL_MS);
 
-            ISpan injectSpan = Tracing.childSpan(span, "databridge.inject_data", "Inject environment data");
+            ISpan injectSpan = Tracing.childSpan(parentSpan, "databridge.inject_data", "Inject environment data");
             injectSpan.setData("env_var_count", envVars.size());
 
             try {
@@ -113,9 +123,9 @@ public class AsyncDataInjector {
                             "Data injection failed - no response for session: " + sessionName));
                     injectSpan.setTag("outcome", "no_response");
                     Tracing.finish(injectSpan, SpanStatus.INTERNAL_ERROR);
-                    span.setTag("outcome", "injection_failed");
-                    span.setTag("failure.reason", "no_response");
-                    Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
+                    parentSpan.setTag("outcome", "injection_failed");
+                    parentSpan.setTag("failure.reason", "no_response");
+                    Tracing.finish(parentSpan, SpanStatus.INTERNAL_ERROR);
                 } else if (!response.get().isSuccess()) {
                     String error = response.get().getError();
                     LOGGER.error(formatLogMessage(correlationId,
@@ -123,36 +133,36 @@ public class AsyncDataInjector {
                     injectSpan.setTag("outcome", "error");
                     injectSpan.setData("error_message", error);
                     Tracing.finish(injectSpan, SpanStatus.INTERNAL_ERROR);
-                    span.setTag("outcome", "injection_failed");
-                    span.setTag("failure.reason", "api_error");
-                    span.setData("error_message", error);
-                    Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
+                    parentSpan.setTag("outcome", "injection_failed");
+                    parentSpan.setTag("failure.reason", "api_error");
+                    parentSpan.setData("error_message", error);
+                    Tracing.finish(parentSpan, SpanStatus.INTERNAL_ERROR);
                 } else {
                     LOGGER.info(
                             formatLogMessage(correlationId, "Data injected successfully for session: " + sessionName));
                     injectSpan.setTag("outcome", "success");
                     Tracing.finishSuccess(injectSpan);
-                    span.setTag("outcome", "success");
-                    Tracing.finishSuccess(span);
+                    parentSpan.setTag("outcome", "success");
+                    Tracing.finishSuccess(parentSpan);
                 }
             } catch (Exception e) {
                 LOGGER.error(formatLogMessage(correlationId, "Exception during data injection"), e);
                 injectSpan.setTag("outcome", "exception");
                 Tracing.finishError(injectSpan, e);
-                span.setTag("outcome", "injection_failed");
-                span.setTag("failure.reason", "exception");
-                Tracing.finishError(span, e);
+                parentSpan.setTag("outcome", "injection_failed");
+                parentSpan.setTag("failure.reason", "exception");
+                Tracing.finishError(parentSpan, e);
             }
             return;
         }
 
-        // Not ready - schedule next health check
+        // Not ready - schedule next health check (pass parentSpan through so all attempts are siblings)
         if (attempt == 0) {
             LOGGER.debug(formatLogMessage(correlationId,
                     "Data bridge not ready yet for session: " + sessionName + ", polling..."));
         }
 
-        scheduler.schedule(() -> pollHealthThenInject(span, session, envVars, correlationId, attempt + 1),
+        scheduler.schedule(() -> pollHealthThenInject(parentSpan, session, envVars, correlationId, attempt + 1),
                 HEALTH_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 

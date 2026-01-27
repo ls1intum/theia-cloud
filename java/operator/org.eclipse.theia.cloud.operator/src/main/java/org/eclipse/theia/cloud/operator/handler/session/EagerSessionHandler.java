@@ -182,7 +182,7 @@ public class EagerSessionHandler implements SessionHandler {
                 if (!envVars.isEmpty()) {
                     Sentry.addBreadcrumb("Scheduling data bridge injection with " + envVars.size() + " env vars",
                             "databridge");
-                    asyncDataInjector.scheduleInjection(session, envVars, correlationId);
+                    asyncDataInjector.scheduleInjection(span, session, envVars, correlationId);
                 }
             }
 

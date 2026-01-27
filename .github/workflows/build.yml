@@ -23,6 +23,8 @@ jobs:
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
+      registry-mirror: "http://harbor-core.harbor.svc.cluster.local"
+      registry-insecure: true
     secrets: inherit
 
   build-and-push-operator:
@@ -34,6 +36,8 @@ jobs:
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
+      registry-mirror: "http://harbor-core.harbor.svc.cluster.local"
+      registry-insecure: true
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -47,6 +51,8 @@ jobs:
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
+      registry-mirror: "http://harbor-core.harbor.svc.cluster.local"
+      registry-insecure: true
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

@@ -28,9 +28,9 @@ jobs:
       docker-file: dockerfiles/operator/Dockerfile
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
+    secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
-    secrets: inherit
 
   build-and-push-service:
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
@@ -38,6 +38,6 @@ jobs:
       docker-file: dockerfiles/service/Dockerfile
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
+    secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
-    secrets: inherit

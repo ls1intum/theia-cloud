@@ -63,7 +63,8 @@ public class AsyncDataInjector {
 
         scheduler.submit(() -> {
             // Start a child span for the async operation
-            ISpan span = Tracing.childSpan(parentSpan, "databridge.inject", "databridge");
+            // Use childSpanInScope to properly bind the span to Sentry's thread-local scope
+            ISpan span = Tracing.childSpanInScope(parentSpan, "databridge.inject", "databridge");
             span.setTag("session.name", sessionName);
             span.setTag("app_definition", appDef);
             span.setData("correlation_id", correlationId);

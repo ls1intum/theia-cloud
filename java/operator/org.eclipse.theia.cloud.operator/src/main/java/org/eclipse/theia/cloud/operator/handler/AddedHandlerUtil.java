@@ -140,7 +140,8 @@ public final class AddedHandlerUtil {
 
         EXECUTOR.execute(() -> {
             // Start a child span for the async URL availability check
-            ISpan span = Tracing.childSpan(parentSpan, "session.url_availability", "session");
+            // Use childSpanInScope to properly bind the span to Sentry's thread-local scope
+            ISpan span = Tracing.childSpanInScope(parentSpan, "session.url_availability", "session");
             span.setTag("session.name", sessionName);
             span.setTag("app_definition", appDef);
             span.setData("correlation_id", correlationId);

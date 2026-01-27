@@ -152,4 +152,34 @@ public final class Tracing {
             return null;
         });
     }
+
+    /**
+     * Creates a child span in a different thread context (e.g., executor thread).
+     * Binds the parent span to the current Sentry scope so child spans are properly tracked.
+     * 
+     * This is necessary when creating spans in executor threads because Sentry's scope
+     * is thread-local. The parent span must be bound to the scope in the executor thread
+     * for child spans to appear correctly in Sentry traces.
+     * 
+     * @param parent The parent span (can be null to start a new transaction)
+     * @param operation The operation name for the child span
+     * @param description The description for the child span
+     * @return The child span, bound to the current scope
+     */
+    public static ISpan childSpanInScope(ISpan parent, String operation, String description) {
+        // Bind parent to scope if it exists (important for executor threads)
+        // This ensures Sentry knows about the parent span in this thread's context
+        if (parent != null) {
+            Sentry.configureScope(scope -> {
+                scope.setActiveSpan(parent);
+            });
+        }
+        // Create child span - it will be automatically linked to parent
+        ISpan child = childSpan(parent, operation, description);
+        // Set child as active span on scope so it's tracked properly
+        Sentry.configureScope(scope -> {
+            scope.setActiveSpan(child);
+        });
+        return child;
+    }
 }

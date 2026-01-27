@@ -25,7 +25,7 @@ import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager.OwnerContext;
 import org.eclipse.theia.cloud.operator.util.ResourceLifecycleManager;
-import org.eclipse.theia.cloud.operator.util.SentryHelper;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudConfigMapUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudDeploymentUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudHandlerUtil;
@@ -173,7 +173,7 @@ public class PrewarmedResourcePool {
             fetchSpan.setData("existing_services", existingServices.size());
             fetchSpan.setData("existing_deployments", existingDeployments.size());
             fetchSpan.setData("existing_configmaps", existingConfigMaps.size());
-            SentryHelper.finishSuccess(fetchSpan);
+            Tracing.finishSuccess(fetchSpan);
 
             // Compute missing IDs
             Set<Integer> missingServiceIds = TheiaCloudServiceUtil.computeIdsOfMissingServices(appDef, correlationId,
@@ -201,16 +201,17 @@ public class PrewarmedResourcePool {
                             .createInternalServiceForEagerInstance(appDef, instance, labels, correlationId).isPresent();
                     if (extOk && intOk) {
                         created++;
-                        SentryHelper.finishSuccess(svcSpan);
+                        Tracing.finishSuccess(svcSpan);
                     } else {
                         failed++;
                         success = false;
-                        SentryHelper.finishWithOutcome(svcSpan, "failure", SpanStatus.INTERNAL_ERROR);
+                        svcSpan.setTag("outcome", "failure"); Tracing.finish(svcSpan, SpanStatus.INTERNAL_ERROR);
                     }
                 }
                 serviceSpan.setData("created", created);
                 serviceSpan.setData("failed", failed);
-                SentryHelper.finishWithOutcome(serviceSpan, failed == 0);
+                serviceSpan.setTag("outcome", failed == 0 ? "success" : "failure");
+                Tracing.finish(serviceSpan, failed == 0 ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             }
 
             // Create missing configmaps (if using Keycloak)
@@ -242,7 +243,7 @@ public class PrewarmedResourcePool {
                                 .createEmailConfigMapForEagerInstance(appDef, instance, labels, correlationId)
                                 .isPresent();
                     }
-                    SentryHelper.finishWithOutcome(cmSpan, success);
+                    cmSpan.setTag("outcome", success ? "success" : "failure"); Tracing.finish(cmSpan, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
                 }
             }
 
@@ -258,23 +259,24 @@ public class PrewarmedResourcePool {
                     if (resourceFactory.createDeploymentForEagerInstance(appDef, instance, labels, correlationId)
                             .isPresent()) {
                         created++;
-                        SentryHelper.finishSuccess(depSpan);
+                        Tracing.finishSuccess(depSpan);
                     } else {
                         failed++;
                         success = false;
-                        SentryHelper.finishWithOutcome(depSpan, "failure", SpanStatus.INTERNAL_ERROR);
+                        depSpan.setTag("outcome", "failure"); Tracing.finish(depSpan, SpanStatus.INTERNAL_ERROR);
                     }
                 }
                 deploySpan.setData("created", created);
                 deploySpan.setData("failed", failed);
-                SentryHelper.finishWithOutcome(deploySpan, failed == 0);
+                deploySpan.setTag("outcome", failed == 0 ? "success" : "failure");
+                Tracing.finish(deploySpan, failed == 0 ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             }
 
-            SentryHelper.finishWithOutcome(span, success);
+            span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -356,10 +358,17 @@ public class PrewarmedResourcePool {
                             }).build());
             success &= intResult.isSuccess();
 
-            SentryHelper.tagReconcileResult(serviceSpan, extResult.getCreated() + intResult.getCreated(),
-                    extResult.getDeleted() + intResult.getDeleted(),
-                    extResult.getRecreated() + intResult.getRecreated(),
-                    extResult.getSkipped() + intResult.getSkipped(), extResult.isSuccess() && intResult.isSuccess());
+            int created = extResult.getCreated() + intResult.getCreated();
+            int deleted = extResult.getDeleted() + intResult.getDeleted();
+            int recreated = extResult.getRecreated() + intResult.getRecreated();
+            int skipped = extResult.getSkipped() + intResult.getSkipped();
+            success = extResult.isSuccess() && intResult.isSuccess();
+            serviceSpan.setData("created_count", created);
+            serviceSpan.setData("deleted_count", deleted);
+            serviceSpan.setData("recreated_count", recreated);
+            serviceSpan.setData("skipped_count", skipped);
+            serviceSpan.setTag("outcome", success ? "success" : "failure");
+            serviceSpan.setTag("had_changes", (created + deleted + recreated) > 0 ? "true" : "false");
             serviceSpan.finish();
 
             // Reconcile configmaps (if using Keycloak)
@@ -419,11 +428,17 @@ public class PrewarmedResourcePool {
                                 }).build());
                 success &= emailResult.isSuccess();
 
-                SentryHelper.tagReconcileResult(cmSpan, proxyResult.getCreated() + emailResult.getCreated(),
-                        proxyResult.getDeleted() + emailResult.getDeleted(),
-                        proxyResult.getRecreated() + emailResult.getRecreated(),
-                        proxyResult.getSkipped() + emailResult.getSkipped(),
-                        proxyResult.isSuccess() && emailResult.isSuccess());
+                int cmCreated = proxyResult.getCreated() + emailResult.getCreated();
+                int cmDeleted = proxyResult.getDeleted() + emailResult.getDeleted();
+                int cmRecreated = proxyResult.getRecreated() + emailResult.getRecreated();
+                int cmSkipped = proxyResult.getSkipped() + emailResult.getSkipped();
+                boolean cmSuccess = proxyResult.isSuccess() && emailResult.isSuccess();
+                cmSpan.setData("created_count", cmCreated);
+                cmSpan.setData("deleted_count", cmDeleted);
+                cmSpan.setData("recreated_count", cmRecreated);
+                cmSpan.setData("skipped_count", cmSkipped);
+                cmSpan.setTag("outcome", cmSuccess ? "success" : "failure");
+                cmSpan.setTag("had_changes", (cmCreated + cmDeleted + cmRecreated) > 0 ? "true" : "false");
                 cmSpan.finish();
             }
 
@@ -455,15 +470,19 @@ public class PrewarmedResourcePool {
                             }).build());
             success &= deployResult.isSuccess();
 
-            SentryHelper.tagReconcileResult(deploySpan, deployResult.getCreated(), deployResult.getDeleted(),
-                    deployResult.getRecreated(), deployResult.getSkipped(), deployResult.isSuccess());
+            deploySpan.setData("created_count", deployResult.getCreated());
+            deploySpan.setData("deleted_count", deployResult.getDeleted());
+            deploySpan.setData("recreated_count", deployResult.getRecreated());
+            deploySpan.setData("skipped_count", deployResult.getSkipped());
+            deploySpan.setTag("outcome", deployResult.isSuccess() ? "success" : "failure");
+            deploySpan.setTag("had_changes", (deployResult.getCreated() + deployResult.getDeleted() + deployResult.getRecreated()) > 0 ? "true" : "false");
             deploySpan.finish();
 
-            SentryHelper.finishWithOutcome(span, success);
+            span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -524,8 +543,8 @@ public class PrewarmedResourcePool {
 
                 ISpan deleteSpan = span.startChild("pool.delete_excess_instance", "Delete excess instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
-                SentryHelper.finishSuccess(deleteSpan);
-                SentryHelper.finishSuccess(span);
+                Tracing.finishSuccess(deleteSpan);
+                Tracing.finishSuccess(span);
                 return;
             }
 
@@ -542,17 +561,17 @@ public class PrewarmedResourcePool {
                 ISpan recreateSpan = span.startChild("pool.recreate_outdated_instance", "Recreate outdated instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
                 createInstanceResources(appDef, instanceId, correlationId);
-                SentryHelper.finishSuccess(recreateSpan);
-                SentryHelper.finishSuccess(span);
+                Tracing.finishSuccess(recreateSpan);
+                Tracing.finishSuccess(span);
                 return;
             }
 
             span.setTag("action", "no_action");
             LOGGER.info(formatLogMessage(correlationId, "Instance " + instanceId + " is up-to-date, no action needed"));
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -670,7 +689,7 @@ public class PrewarmedResourcePool {
             success &= ResourceLifecycleManager.releaseOwnership(services, owner,
                     s -> client.kubernetes().services().inNamespace(client.namespace()).resource(s), "service",
                     correlationId);
-            SentryHelper.finishWithOutcome(svcSpan, success);
+            svcSpan.setTag("outcome", success ? "success" : "failure"); Tracing.finish(svcSpan, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
 
             ISpan cmSpan = span.startChild("pool.release_configmaps", "Release configmaps");
             List<ConfigMap> configMaps = K8sUtil.getExistingConfigMaps(client.kubernetes(), client.namespace(),
@@ -680,7 +699,7 @@ public class PrewarmedResourcePool {
                     cm -> client.kubernetes().configMaps().inNamespace(client.namespace()).resource(cm), "configmap",
                     correlationId);
             success &= cmSuccess;
-            SentryHelper.finishWithOutcome(cmSpan, cmSuccess);
+            cmSpan.setTag("outcome", cmSuccess ? "success" : "failure"); Tracing.finish(cmSpan, cmSuccess ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
 
             ISpan deploySpan = span.startChild("pool.release_deployments", "Release deployments");
             List<Deployment> deployments = K8sUtil.getExistingDeployments(client.kubernetes(), client.namespace(),
@@ -690,13 +709,13 @@ public class PrewarmedResourcePool {
                     d -> client.kubernetes().apps().deployments().inNamespace(client.namespace()).resource(d),
                     "deployment", correlationId);
             success &= deploySuccess;
-            SentryHelper.finishWithOutcome(deploySpan, deploySuccess);
+            deploySpan.setTag("outcome", deploySuccess ? "success" : "failure"); Tracing.finish(deploySpan, deploySuccess ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
 
-            SentryHelper.finishWithOutcome(span, success);
+            span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -738,7 +757,9 @@ public class PrewarmedResourcePool {
             int totalCapacity = externalServices.size();
             int availableCount = (int) externalServices.stream().filter(s -> TheiaCloudServiceUtil.isUnusedService(s))
                     .count();
-            SentryHelper.tagPoolCapacity(span, totalCapacity, availableCount);
+            span.setData("pool.total_capacity", totalCapacity);
+            span.setData("pool.available", availableCount);
+            span.setData("pool.utilization_pct", totalCapacity > 0 ? (int) ((1.0 - (double) availableCount / totalCapacity) * 100) : 0);;
 
             // Check if session already has a reservation
             Optional<Service> alreadyReservedExternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,
@@ -751,14 +772,15 @@ public class PrewarmedResourcePool {
                 Integer intId = parseInstanceId(alreadyReservedInternal.get());
                 if (extId == null || intId == null || !extId.equals(intId)) {
                     LOGGER.error(formatLogMessage(correlationId, "Reservation mismatch for session " + sessionName));
-                    SentryHelper.tagReservationOutcome(span, "error", null);
-                    SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                    span.setTag("pool.outcome", "error");;
+                    span.setTag("outcome", "error"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                     return ReservationResult.error();
                 }
                 String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, extId);
                 span.setTag("reservation.type", "already_reserved");
-                SentryHelper.tagReservationOutcome(span, "success", extId);
-                SentryHelper.finishSuccess(span);
+                span.setTag("pool.outcome", "success");
+                span.setData("instance_id", extId);;
+                Tracing.finishSuccess(span);
                 return ReservationResult.success(new PoolInstance(extId, alreadyReservedExternal.get(),
                         alreadyReservedInternal.get(), deploymentName));
             }
@@ -772,12 +794,16 @@ public class PrewarmedResourcePool {
                 span.setTag("reservation.type", "partial_recovery");
                 ReservationResult result = handlePartialReservation(session, appDef, alreadyReservedExternal,
                         alreadyReservedInternal, externalByInstance, internalByInstance, correlationId);
-                SentryHelper.tagReservationOutcome(span, result.getOutcome().name().toLowerCase(),
-                        result.getInstance().map(PoolInstance::getInstanceId).orElse(null));
-                SentryHelper.finishWithOutcome(span,
-                        result.getOutcome() == ReservationOutcome.SUCCESS ? "success"
-                                : result.getOutcome().name().toLowerCase(),
-                        result.getOutcome() == ReservationOutcome.SUCCESS ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
+                span.setTag("pool.outcome", result.getOutcome().name().toLowerCase());
+                Integer instanceId = result.getInstance().map(PoolInstance::getInstanceId).orElse(null);
+                if (instanceId != null) {
+                    span.setData("instance_id", instanceId);
+                }
+                String outcome = result.getOutcome() == ReservationOutcome.SUCCESS ? "success"
+                        : result.getOutcome().name().toLowerCase();
+                SpanStatus status = result.getOutcome() == ReservationOutcome.SUCCESS ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR;
+                span.setTag("outcome", outcome);
+                Tracing.finish(span, status);
                 return result;
             }
 
@@ -791,8 +817,8 @@ public class PrewarmedResourcePool {
             if (availableIds.isEmpty()) {
                 LOGGER.info(formatLogMessage(correlationId, "No prewarmed instances available"));
                 span.setTag("reservation.type", "no_capacity");
-                SentryHelper.tagReservationOutcome(span, "no_capacity", null);
-                SentryHelper.finishWithOutcome(span, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
+                span.setTag("pool.outcome", "no_capacity");;
+                span.setTag("outcome", "no_capacity"); Tracing.finish(span, SpanStatus.RESOURCE_EXHAUSTED);
                 return ReservationResult.noCapacity();
             }
 
@@ -807,36 +833,37 @@ public class PrewarmedResourcePool {
             ISpan reserveExtSpan = span.startChild("pool.reserve_external_service", "Reserve external service");
             try {
                 reserveService(chosenExternal, sessionName, sessionUID, correlationId);
-                SentryHelper.finishSuccess(reserveExtSpan);
+                Tracing.finishSuccess(reserveExtSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Failed to reserve external service"), e);
-                SentryHelper.finishError(reserveExtSpan, e);
-                SentryHelper.tagReservationOutcome(span, "error", null);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(reserveExtSpan, e);
+                span.setTag("pool.outcome", "error");;
+                span.setTag("outcome", "error"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return ReservationResult.error();
             }
 
             ISpan reserveIntSpan = span.startChild("pool.reserve_internal_service", "Reserve internal service");
             try {
                 reserveService(chosenInternal, sessionName, sessionUID, correlationId);
-                SentryHelper.finishSuccess(reserveIntSpan);
+                Tracing.finishSuccess(reserveIntSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Failed to reserve internal service"), e);
-                SentryHelper.finishError(reserveIntSpan, e);
+                Tracing.finishError(reserveIntSpan, e);
                 rollbackReservation(chosenExternal, sessionName, sessionUID, correlationId);
-                SentryHelper.tagReservationOutcome(span, "error", null);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                span.setTag("pool.outcome", "error");;
+                span.setTag("outcome", "error"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return ReservationResult.error();
             }
 
             String deploymentName = TheiaCloudDeploymentUtil.getDeploymentName(appDef, chosenInstance);
-            SentryHelper.tagReservationOutcome(span, "success", chosenInstance);
-            SentryHelper.finishSuccess(span);
+            span.setTag("pool.outcome", "success");
+                span.setData("instance_id", chosenInstance);;
+            Tracing.finishSuccess(span);
             return ReservationResult
                     .success(new PoolInstance(chosenInstance, chosenExternal, chosenInternal, deploymentName));
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -865,11 +892,11 @@ public class PrewarmedResourcePool {
             try {
                 addSessionLabelsToService(instance.getExternalService(), sessionLabels, correlationId);
                 addSessionLabelsToService(instance.getInternalService(), sessionLabels, correlationId);
-                SentryHelper.finishSuccess(labelSpan);
+                Tracing.finishSuccess(labelSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Failed to add session labels to services"), e);
-                SentryHelper.finishError(labelSpan, e);
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(labelSpan, e);
+                span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
 
@@ -878,11 +905,11 @@ public class PrewarmedResourcePool {
             try {
                 client.kubernetes().inNamespace(session.getMetadata().getNamespace()).apps().deployments().withName(instance.getDeploymentName()).edit(
                         d -> TheiaCloudHandlerUtil.addOwnerReferenceToItem(correlationId, sessionName, sessionUID, d));
-                SentryHelper.finishSuccess(deploySpan);
+                Tracing.finishSuccess(deploySpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Failed to reserve deployment"), e);
-                SentryHelper.finishError(deploySpan, e);
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(deploySpan, e);
+                span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
 
@@ -896,25 +923,25 @@ public class PrewarmedResourcePool {
                                 session.getSpec().getUser()));
                         return cm;
                     });
-                    SentryHelper.finishSuccess(emailSpan);
+                    Tracing.finishSuccess(emailSpan);
                 } catch (KubernetesClientException e) {
                     LOGGER.error(formatLogMessage(correlationId, "Failed to configure email config"), e);
-                    SentryHelper.finishError(emailSpan, e);
-                    SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                    Tracing.finishError(emailSpan, e);
+                    span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                     return false;
                 }
 
                 // Trigger pod refresh
                 ISpan refreshSpan = span.startChild("pool.refresh_pods", "Trigger pod refresh");
                 refreshPods(instance.getDeploymentName(), correlationId);
-                SentryHelper.finishSuccess(refreshSpan);
+                Tracing.finishSuccess(refreshSpan);
             }
 
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
             return true;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
@@ -947,7 +974,7 @@ public class PrewarmedResourcePool {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No services found for session " + session.getSpec().getName()));
                 span.setTag("error.reason", "no_services_found");
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.NOT_FOUND);
+                span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return false;
             }
 
@@ -962,7 +989,7 @@ public class PrewarmedResourcePool {
                 span.setTag("error.reason", "service_count_mismatch");
                 span.setData("external_count", externalServices.size());
                 span.setData("internal_count", internalServices.size());
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
 
@@ -973,7 +1000,7 @@ public class PrewarmedResourcePool {
             if (instanceId == null) {
                 LOGGER.error(formatLogMessage(correlationId, "Cannot determine instance ID from service"));
                 span.setTag("error.reason", "cannot_parse_instance_id");
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "failure"); Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
             span.setData("instance_id", instanceId);
@@ -984,7 +1011,7 @@ public class PrewarmedResourcePool {
             ISpan svcSpan = span.startChild("pool.cleanup_services", "Clean up services");
             success &= cleanupService(externalService, sessionName, sessionUID, correlationId);
             success &= cleanupService(internalService, sessionName, sessionUID, correlationId);
-            SentryHelper.finishWithOutcome(svcSpan, success);
+            svcSpan.setTag("outcome", success ? "success" : "failure"); Tracing.finish(svcSpan, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
 
             // Clean up deployment
             ISpan deploySpan = span.startChild("pool.cleanup_deployment", "Clean up deployment");
@@ -992,10 +1019,10 @@ public class PrewarmedResourcePool {
             try {
                 client.kubernetes().apps().deployments().withName(deploymentName).edit(d -> TheiaCloudHandlerUtil
                         .removeOwnerReferenceFromItem(correlationId, sessionName, sessionUID, d));
-                SentryHelper.finishSuccess(deploySpan);
+                Tracing.finishSuccess(deploySpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Failed to clean up deployment"), e);
-                SentryHelper.finishError(deploySpan, e);
+                Tracing.finishError(deploySpan, e);
                 success = false;
             }
 
@@ -1008,10 +1035,10 @@ public class PrewarmedResourcePool {
                         cm.setData(Collections.singletonMap(AddedHandlerUtil.FILENAME_AUTHENTICATED_EMAILS_LIST, null));
                         return cm;
                     });
-                    SentryHelper.finishSuccess(emailSpan);
+                    Tracing.finishSuccess(emailSpan);
                 } catch (KubernetesClientException e) {
                     LOGGER.error(formatLogMessage(correlationId, "Failed to clear email config"), e);
-                    SentryHelper.finishError(emailSpan, e);
+                    Tracing.finishError(emailSpan, e);
                     success = false;
                 }
             }
@@ -1019,13 +1046,13 @@ public class PrewarmedResourcePool {
             // Delete pod to reset state
             ISpan podSpan = span.startChild("pool.delete_pod", "Delete pod to reset state");
             deletePod(deploymentName, correlationId);
-            SentryHelper.finishSuccess(podSpan);
+            Tracing.finishSuccess(podSpan);
 
-            SentryHelper.finishWithOutcome(span, success);
+            span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }

@@ -33,7 +33,7 @@ import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool;
-import org.eclipse.theia.cloud.operator.util.SentryHelper;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.util.SessionEnvCollector;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.PoolInstance;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationOutcome;
@@ -82,24 +82,21 @@ public class EagerSessionHandler implements SessionHandler {
     private AsyncDataInjector asyncDataInjector;
 
     @Override
-    public boolean sessionAdded(Session session, String correlationId) {
-        return trySessionAdded(session, correlationId) == EagerSessionAddedOutcome.HANDLED;
+    public boolean sessionAdded(Session session, String correlationId, ISpan span) {
+        return trySessionAdded(session, correlationId, span) == EagerSessionAddedOutcome.HANDLED;
     }
 
     /**
      * Tries to handle a session using eager start. Returns the outcome so callers can fall back to lazy start if
      * needed.
      */
-    public EagerSessionAddedOutcome trySessionAdded(Session session, String correlationId) {
+    public EagerSessionAddedOutcome trySessionAdded(Session session, String correlationId, ISpan parentSpan) {
         SessionSpec spec = session.getSpec();
         String sessionName = spec.getName();
         String appDefinitionID = spec.getAppDefinition();
 
-        // Get current span from parent transaction
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null
-                ? parentSpan.startChild("eager.setup", "Eager session setup")
-                : Sentry.startTransaction("eager.setup", "session");
+        // Create child span from parent span
+        ISpan span = Tracing.childSpan(parentSpan, "eager.setup", "Eager session setup");
 
         span.setData("session_name", sessionName);
         span.setData("app_definition", appDefinitionID);
@@ -109,115 +106,123 @@ public class EagerSessionHandler implements SessionHandler {
 
         try {
             // Find app definition
-            ISpan appDefSpan = span.startChild("eager.find_appdef", "Find app definition");
+            ISpan appDefSpan = Tracing.childSpan(span, "eager.find_appdef", "Find app definition");
             Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
             if (appDefOpt.isEmpty()) {
                 LOGGER.error(
                         formatLogMessage(correlationId, "No App Definition with name " + appDefinitionID + " found."));
-                SentryHelper.finishWithOutcome(appDefSpan, "not_found", SpanStatus.NOT_FOUND);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.NOT_FOUND);
+                appDefSpan.setTag("outcome", "not_found");
+                Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
+                span.setTag("outcome", "error");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return EagerSessionAddedOutcome.ERROR;
             }
             AppDefinition appDef = appDefOpt.get();
-            SentryHelper.finishSuccess(appDefSpan);
+            Tracing.finishSuccess(appDefSpan);
 
             // Find ingress
-            ISpan ingressSpan = span.startChild("eager.find_ingress", "Find ingress");
+            ISpan ingressSpan = Tracing.childSpan(span, "eager.find_ingress", "Find ingress");
             Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
             if (ingressOpt.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No Ingress for app definition " + appDefinitionID + " found."));
-                SentryHelper.finishWithOutcome(ingressSpan, "not_found", SpanStatus.NOT_FOUND);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.NOT_FOUND);
+                ingressSpan.setTag("outcome", "not_found");
+                Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
+                span.setTag("outcome", "error");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return EagerSessionAddedOutcome.ERROR;
             }
             Ingress ingress = ingressOpt.get();
-            SentryHelper.finishSuccess(ingressSpan);
+            Tracing.finishSuccess(ingressSpan);
 
             // Reserve an instance from the pool
-            ISpan reserveSpan = span.startChild("eager.reserve_instance", "Reserve pool instance");
+            ISpan reserveSpan = Tracing.childSpan(span, "eager.reserve_instance", "Reserve pool instance");
             ReservationResult reservation = pool.reserveInstance(session, appDef, correlationId);
             reserveSpan.setTag("pool.outcome", reservation.getOutcome().name().toLowerCase());
 
             if (reservation.getOutcome() == ReservationOutcome.NO_CAPACITY) {
-                SentryHelper.finishWithOutcome(reserveSpan, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
-                SentryHelper.finishWithOutcome(span, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
+                reserveSpan.setTag("outcome", "no_capacity");
+                Tracing.finish(reserveSpan, SpanStatus.RESOURCE_EXHAUSTED);
+                span.setTag("outcome", "no_capacity");
+                Tracing.finish(span, SpanStatus.RESOURCE_EXHAUSTED);
                 return EagerSessionAddedOutcome.NO_CAPACITY;
             }
             if (reservation.getOutcome() == ReservationOutcome.ERROR) {
-                SentryHelper.finishWithOutcome(reserveSpan, "error", SpanStatus.INTERNAL_ERROR);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                reserveSpan.setTag("outcome", "error");
+                Tracing.finish(reserveSpan, SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "error");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return EagerSessionAddedOutcome.ERROR;
             }
 
             PoolInstance instance = reservation.getInstance().get();
             reserveSpan.setData("instance_id", instance.getInstanceId());
-            SentryHelper.finishSuccess(reserveSpan);
+            Tracing.finishSuccess(reserveSpan);
 
             // Annotate session with start strategy and instance ID
-            ISpan annotateSpan = span.startChild("eager.annotate_session", "Annotate session");
+            ISpan annotateSpan = Tracing.childSpan(span, "eager.annotate_session", "Annotate session");
             annotateSession(session, correlationId, instance.getInstanceId());
-            SentryHelper.finishSuccess(annotateSpan);
+            Tracing.finishSuccess(annotateSpan);
 
             // Complete session setup (labels, deployment ownership, email config)
-            ISpan setupSpan = span.startChild("eager.complete_setup", "Complete session setup");
+            ISpan setupSpan = Tracing.childSpan(span, "eager.complete_setup", "Complete session setup");
             setupSpan.setData("instance_id", instance.getInstanceId());
             if (!pool.completeSessionSetup(session, appDef, instance, correlationId)) {
-                SentryHelper.finishWithOutcome(setupSpan, "failure", SpanStatus.INTERNAL_ERROR);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                setupSpan.setTag("outcome", "failure");
+                Tracing.finish(setupSpan, SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "error");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return EagerSessionAddedOutcome.ERROR;
             }
-            SentryHelper.finishSuccess(setupSpan);
+            Tracing.finishSuccess(setupSpan);
 
             // Schedule async credential injection via data bridge (tracked in separate transaction)
             if (DataBridgeUtil.isDataBridgeEnabled(appDef.getSpec())) {
                 Map<String, String> envVars = sessionEnvCollector.collect(session, correlationId);
                 if (!envVars.isEmpty()) {
-                    SentryHelper.breadcrumb("Scheduling data bridge injection with " + envVars.size() + " env vars",
+                    Sentry.addBreadcrumb("Scheduling data bridge injection with " + envVars.size() + " env vars",
                             "databridge");
                     asyncDataInjector.scheduleInjection(session, envVars, correlationId);
                 }
             }
 
             // Add ingress rule
-            ISpan ingressRuleSpan = span.startChild("eager.add_ingress_rule", "Add ingress rule");
+            ISpan ingressRuleSpan = Tracing.childSpan(span, "eager.add_ingress_rule", "Add ingress rule");
             String host;
             try {
                 host = ingressManager.addRuleForEagerSession(ingress, instance.getExternalService(), appDef,
                         instance.getInstanceId(), correlationId);
                 ingressRuleSpan.setData("host", host);
-                SentryHelper.finishSuccess(ingressRuleSpan);
+                Tracing.finishSuccess(ingressRuleSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Error while editing ingress"), e);
-                SentryHelper.finishError(ingressRuleSpan, e);
-                SentryHelper.finishWithOutcome(span, "error", SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(ingressRuleSpan, e);
+                span.setTag("outcome", "error");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return EagerSessionAddedOutcome.ERROR;
             }
 
             // Schedule async URL availability check (tracked in separate transaction: session.url_availability)
-            SentryHelper.breadcrumb("Scheduling URL availability check for " + host, "session");
+            Sentry.addBreadcrumb("Scheduling URL availability check for " + host, "session");
             AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId);
 
             span.setData("instance_id", instance.getInstanceId());
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
             return EagerSessionAddedOutcome.HANDLED;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }
 
     @Override
-    public boolean sessionDeleted(Session session, String correlationId) {
+    public boolean sessionDeleted(Session session, String correlationId, ISpan parentSpan) {
         SessionSpec spec = session.getSpec();
         String sessionName = spec.getName();
         String appDefinitionID = spec.getAppDefinition();
 
-        ISpan parentSpan = Sentry.getSpan();
-        ISpan span = parentSpan != null
-                ? parentSpan.startChild("eager.cleanup", "Eager session cleanup")
-                : Sentry.startTransaction("eager.cleanup", "session");
+        ISpan span = Tracing.childSpan(parentSpan, "eager.cleanup", "Eager session cleanup");
 
         span.setData("session_name", sessionName);
         span.setData("app_definition", appDefinitionID);
@@ -226,29 +231,32 @@ public class EagerSessionHandler implements SessionHandler {
 
         try {
             // Find app definition
-            ISpan appDefSpan = span.startChild("eager.find_appdef", "Find app definition");
+            ISpan appDefSpan = Tracing.childSpan(span, "eager.find_appdef", "Find app definition");
             Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
             if (appDefOpt.isEmpty()) {
                 LOGGER.info(formatLogMessage(correlationId,
                         "No App Definition found. Resources will be cleaned up by K8s garbage collection."));
-                SentryHelper.finishWithOutcome(appDefSpan, "not_found", SpanStatus.NOT_FOUND);
-                SentryHelper.finishSuccess(span); // This is OK - K8s GC handles it
+                appDefSpan.setTag("outcome", "not_found");
+                Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
+                Tracing.finishSuccess(span); // This is OK - K8s GC handles it
                 return true;
             }
             AppDefinition appDef = appDefOpt.get();
-            SentryHelper.finishSuccess(appDefSpan);
+            Tracing.finishSuccess(appDefSpan);
 
             // Find ingress
-            ISpan ingressSpan = span.startChild("eager.find_ingress", "Find ingress");
+            ISpan ingressSpan = Tracing.childSpan(span, "eager.find_ingress", "Find ingress");
             Optional<Ingress> ingressOpt = ingressManager.getIngress(appDef, correlationId);
             if (ingressOpt.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No Ingress for app definition " + appDefinitionID + " found."));
-                SentryHelper.finishWithOutcome(ingressSpan, "not_found", SpanStatus.NOT_FOUND);
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                ingressSpan.setTag("outcome", "not_found");
+                Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
-            SentryHelper.finishSuccess(ingressSpan);
+            Tracing.finishSuccess(ingressSpan);
 
             // Get instance ID from session annotation
             Integer instanceId = getInstanceIdFromAnnotation(session);
@@ -256,41 +264,45 @@ public class EagerSessionHandler implements SessionHandler {
                 LOGGER.error(formatLogMessage(correlationId,
                         "Session missing instance-id annotation. Cannot determine which instance to release."));
                 span.setTag("error.reason", "missing_instance_id_annotation");
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
             span.setData("instance_id", instanceId);
 
             // Remove ingress rule
-            ISpan removeIngressSpan = span.startChild("eager.remove_ingress_rule", "Remove ingress rule");
+            ISpan removeIngressSpan = Tracing.childSpan(span, "eager.remove_ingress_rule", "Remove ingress rule");
             removeIngressSpan.setData("instance_id", instanceId);
             try {
                 ingressManager.removeRuleForEagerSession(ingressOpt.get(), appDef, instanceId, correlationId);
-                SentryHelper.finishSuccess(removeIngressSpan);
+                Tracing.finishSuccess(removeIngressSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Error while removing ingress rule"), e);
-                SentryHelper.finishError(removeIngressSpan, e);
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(removeIngressSpan, e);
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 return false;
             }
 
             // Release instance back to pool
-            ISpan releaseSpan = span.startChild("eager.release_instance", "Release pool instance");
+            ISpan releaseSpan = Tracing.childSpan(span, "eager.release_instance", "Release pool instance");
             releaseSpan.setData("instance_id", instanceId);
             boolean success = pool.releaseInstance(session, appDef, correlationId);
-            SentryHelper.finishWithOutcome(releaseSpan, success);
+            releaseSpan.setTag("outcome", success ? "success" : "failure");
+            Tracing.finish(releaseSpan, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
 
             // Reconcile the specific instance
-            ISpan reconcileSpan = span.startChild("eager.reconcile_instance", "Reconcile released instance");
+            ISpan reconcileSpan = Tracing.childSpan(span, "eager.reconcile_instance", "Reconcile released instance");
             reconcileSpan.setData("instance_id", instanceId);
             pool.reconcileInstance(appDef, instanceId, correlationId);
-            SentryHelper.finishSuccess(reconcileSpan);
+            Tracing.finishSuccess(reconcileSpan);
 
-            SentryHelper.finishWithOutcome(span, success);
+            span.setTag("outcome", success ? "success" : "failure");
+            Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
         } catch (Exception e) {
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             throw e;
         }
     }

@@ -10,12 +10,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
-import org.eclipse.theia.cloud.operator.util.SentryHelper;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 import com.google.inject.Inject;
 
 import io.sentry.ISpan;
 import io.sentry.ITransaction;
+import io.sentry.Sentry;
 import io.sentry.SpanStatus;
 
 /**
@@ -39,101 +40,96 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
     private TheiaCloudClient client;
 
     @Override
-    public boolean sessionAdded(Session session, String correlationId) {
-        String sessionName = session.getSpec().getName();
-        String appDef = session.getSpec().getAppDefinition();
-        String user = session.getSpec().getUser();
-
-        ITransaction tx = SentryHelper.startSessionTransaction("added", sessionName, appDef, user, correlationId);
-
+    public boolean sessionAdded(Session session, String correlationId, ISpan span) {
         try {
             // Try eager start first
-            ISpan eagerSpan = tx.startChild("session.eager_attempt", "Attempt eager session start");
+            ISpan eagerSpan = Tracing.childSpan(span, "session.eager_attempt", "Attempt eager session start");
             eagerSpan.setTag("session.strategy", "eager");
 
-            EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId);
+            EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId, eagerSpan);
             eagerSpan.setData("eager_outcome", eagerOutcome.name());
 
             if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.HANDLED) {
-                SentryHelper.finishSuccess(eagerSpan);
-                tx.setTag("session.strategy", "eager");
-                SentryHelper.finishSuccess(tx);
+                Tracing.finishSuccess(eagerSpan);
+                span.setTag("session.strategy", "eager");
                 return true;
             }
 
             if (eagerOutcome == EagerSessionHandler.EagerSessionAddedOutcome.ERROR) {
-                SentryHelper.finishWithOutcome(eagerSpan, "error", SpanStatus.INTERNAL_ERROR);
-                tx.setTag("session.strategy", "eager");
-                SentryHelper.finishWithOutcome(tx, "error", SpanStatus.INTERNAL_ERROR);
+                eagerSpan.setTag("outcome", "error");
+                Tracing.finish(eagerSpan, SpanStatus.INTERNAL_ERROR);
+                span.setTag("session.strategy", "eager");
                 return false;
             }
 
             // NO_CAPACITY - fall back to lazy
-            SentryHelper.finishWithOutcome(eagerSpan, "no_capacity", SpanStatus.RESOURCE_EXHAUSTED);
-            SentryHelper.tagFallback(tx, "no_prewarmed_capacity");
+            eagerSpan.setTag("outcome", "no_capacity");
+            Tracing.finish(eagerSpan, SpanStatus.RESOURCE_EXHAUSTED);
+            span.setTag("fallback", "true");
+            span.setTag("fallback.reason", "no_prewarmed_capacity");
 
             LOGGER.info(formatLogMessage(correlationId,
                     "No prewarmed capacity left. Falling back to lazy session handling."));
 
-            ISpan lazySpan = tx.startChild("session.lazy_fallback", "Fallback to lazy session start");
+            ISpan lazySpan = Tracing.childSpan(span, "session.lazy_fallback", "Fallback to lazy session start");
             lazySpan.setTag("session.strategy", "lazy-fallback");
             lazySpan.setTag("fallback.reason", "no_prewarmed_capacity");
 
-            boolean lazyResult = lazy.sessionAdded(session, correlationId);
+            boolean lazyResult = lazy.sessionAdded(session, correlationId, span);
 
             if (lazyResult) {
                 annotateSessionStrategy(session, correlationId, SESSION_START_STRATEGY_LAZY_FALLBACK);
-                SentryHelper.finishSuccess(lazySpan);
-                tx.setTag("session.strategy", "lazy-fallback");
-                SentryHelper.finishSuccess(tx);
+                Tracing.finishSuccess(lazySpan);
+                span.setTag("session.strategy", "lazy-fallback");
             } else {
-                SentryHelper.finishWithOutcome(lazySpan, "failure", SpanStatus.INTERNAL_ERROR);
-                tx.setTag("session.strategy", "lazy-fallback");
-                SentryHelper.finishWithOutcome(tx, "failure", SpanStatus.INTERNAL_ERROR);
+                lazySpan.setTag("outcome", "failure");
+                Tracing.finish(lazySpan, SpanStatus.INTERNAL_ERROR);
+                span.setTag("session.strategy", "lazy-fallback");
             }
 
             return lazyResult;
 
         } catch (Exception e) {
-            SentryHelper.captureError(e, "session.added", correlationId);
-            SentryHelper.finishError(tx, e);
+            Sentry.withScope(scope -> {
+                scope.setTag("operation", "session.added");
+                scope.setTag("correlation_id", correlationId);
+                Sentry.captureException(e);
+            });
             throw e;
         }
     }
 
     @Override
-    public boolean sessionDeleted(Session session, String correlationId) {
-        String sessionName = session.getSpec().getName();
-        String appDef = session.getSpec().getAppDefinition();
-        String user = session.getSpec().getUser();
-
-        ITransaction tx = SentryHelper.startSessionTransaction("deleted", sessionName, appDef, user, correlationId);
-
+    public boolean sessionDeleted(Session session, String correlationId, ISpan parentSpan) {
         try {
             String strategy = Optional.ofNullable(session.getMetadata()).map(m -> m.getAnnotations())
                     .map(a -> a.get(EagerSessionHandler.SESSION_START_STRATEGY_ANNOTATION)).orElse("unknown");
 
-            tx.setTag("session.start_strategy", strategy);
+            parentSpan.setTag("session.start_strategy", strategy);
 
             boolean result;
             if (EagerSessionHandler.SESSION_START_STRATEGY_EAGER.equals(strategy)) {
-                ISpan span = tx.startChild("session.eager_cleanup", "Eager session cleanup");
+                ISpan span = Tracing.childSpan(parentSpan, "session.eager_cleanup", "Eager session cleanup");
                 span.setTag("cleanup.type", "eager");
-                result = eager.sessionDeleted(session, correlationId);
-                SentryHelper.finishWithOutcome(span, result);
+                result = eager.sessionDeleted(session, correlationId, parentSpan);
+                span.setTag("outcome", result ? "success" : "failure");
+                Tracing.finish(span, result ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             } else {
-                ISpan span = tx.startChild("session.lazy_cleanup", "Lazy session cleanup");
+                ISpan span = Tracing.childSpan(parentSpan, "session.lazy_cleanup", "Lazy session cleanup");
                 span.setTag("cleanup.type", "lazy");
-                result = lazy.sessionDeleted(session, correlationId);
-                SentryHelper.finishWithOutcome(span, result);
+                result = lazy.sessionDeleted(session, correlationId, parentSpan);
+                span.setTag("outcome", result ? "success" : "failure");
+                Tracing.finish(span, result ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             }
 
-            SentryHelper.finishWithOutcome(tx, result);
             return result;
 
         } catch (Exception e) {
-            SentryHelper.captureError(e, "session.deleted", correlationId);
-            SentryHelper.finishError(tx, e);
+            Sentry.withScope(scope -> {
+                scope.setTag("operation", "session.deleted");
+                scope.setTag("correlation_id", correlationId);
+                Sentry.captureException(e);
+            });
             throw e;
         }
     }

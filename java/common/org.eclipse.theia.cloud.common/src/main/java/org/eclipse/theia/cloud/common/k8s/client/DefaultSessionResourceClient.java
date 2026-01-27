@@ -16,6 +16,8 @@
 package org.eclipse.theia.cloud.common.k8s.client;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -23,6 +25,7 @@ import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpecResourceList;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionStatus;
+import org.eclipse.theia.cloud.common.tracing.TraceContext;
 import org.eclipse.theia.cloud.common.util.TheiaCloudError;
 
 import io.fabric8.kubernetes.api.model.ObjectMeta;
@@ -46,6 +49,14 @@ public class DefaultSessionResourceClient extends BaseResourceClient<Session, Se
 
         ObjectMeta metadata = new ObjectMeta();
         metadata.setName(spec.getName());
+        
+        // Inject trace context into annotations for operator to continue trace
+        Map<String, String> annotations = new HashMap<>();
+        TraceContext.fromCurrent().ifPresent(ctx -> ctx.mergeInto(annotations));
+        if (!annotations.isEmpty()) {
+            metadata.setAnnotations(annotations);
+        }
+        
         session.setMetadata(metadata);
 
         info(correlationId, "Create Session " + session.getSpec());

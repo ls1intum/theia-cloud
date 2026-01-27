@@ -21,6 +21,7 @@ jobs:
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
       runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
     secrets: inherit
 
@@ -31,6 +32,7 @@ jobs:
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
       runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
     secrets:
       docker-secrets: |
@@ -43,6 +45,7 @@ jobs:
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
       runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
       build-arm64: true
     secrets:
       docker-secrets: |

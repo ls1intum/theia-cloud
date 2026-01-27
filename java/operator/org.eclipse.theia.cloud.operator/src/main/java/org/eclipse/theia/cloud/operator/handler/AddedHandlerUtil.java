@@ -152,27 +152,30 @@ public final class AddedHandlerUtil {
             String failureReason = null;
 
             try {
-                for (int i = 1; i <= 100; i++) {
+                for (int i = 1; i <= 309; i++) {
                     ISpan attemptSpan = Tracing.childSpan(span, "session.url_check_attempt", "URL availability check attempt " + i);
                     attemptSpan.setData("attempt", i);
                     
                     try {
                         /*
-                         * On the first 15 loops we will check every 2.5s whether URL is available. This will take at
-                         * least 37.5s. On the second 15 loops we will check every 5s. This will take at least 75s. On
-                         * the next 15 loops we will check every 10s. This will take at least further 150s. If the pod
-                         * has not started within the first 4-5 minutes, we will continue to check every minute. We
-                         * give up after an hour.
+                         * On the first 60 loops we will check every 500ms whether URL is available. This will take at
+                         * least 30s. On the next 60 loops we will check every 1000ms. This will take at least 60s. On
+                         * the next 24 loops we will check every 2500ms. This will take at least further 60s. On the
+                         * next 60 loops we will check every 5000ms. This will take at least further 5 minutes. If the
+                         * pod has not started within the first ~7 minutes, we will continue to check every 30 seconds.
+                         * We give up after an hour.
                          */
                         long sleepDuration;
-                        if (i <= 15) {
+                        if (i <= 60) {
+                            sleepDuration = 500;
+                        } else if (i <= 120) {
+                            sleepDuration = 1000;
+                        } else if (i <= 144) {
                             sleepDuration = 2500;
-                        } else if (i <= 30) {
+                        } else if (i <= 204) {
                             sleepDuration = 5000;
-                        } else if (i <= 45) {
-                            sleepDuration = 10000;
                         } else {
-                            sleepDuration = 60000;
+                            sleepDuration = 30000;
                         }
                         attemptSpan.setData("sleep_duration_ms", sleepDuration);
                         
@@ -277,7 +280,7 @@ public final class AddedHandlerUtil {
                 // Exhausted all attempts
                 long duration = System.currentTimeMillis() - startTime;
                 span.setTag("outcome", "timeout");
-                span.setData("attempts", 100);
+                span.setData("attempts", 309);
                 span.setData("duration_ms", duration);
                 span.setData("last_response_code", lastResponseCode);
                 if (failureReason != null) {

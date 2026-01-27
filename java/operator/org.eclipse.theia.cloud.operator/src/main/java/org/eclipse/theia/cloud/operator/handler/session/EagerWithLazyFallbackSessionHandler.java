@@ -77,7 +77,7 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
         lazySpan.setTag("session.strategy", "lazy-fallback");
         lazySpan.setTag("fallback.reason", "no_prewarmed_capacity");
 
-        boolean lazyResult = lazy.sessionAdded(session, correlationId, span);
+        boolean lazyResult = lazy.sessionAdded(session, correlationId, lazySpan);
 
         if (lazyResult) {
             annotateSessionStrategy(session, correlationId, SESSION_START_STRATEGY_LAZY_FALLBACK);

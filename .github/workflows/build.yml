@@ -20,6 +20,8 @@ jobs:
       docker-file: dockerfiles/landing-page/Dockerfile
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
+      runner-amd64: "arc-runner-set-stateless"
+      build-arm64: false
     secrets: inherit
 
   build-and-push-operator:
@@ -28,6 +30,8 @@ jobs:
       docker-file: dockerfiles/operator/Dockerfile
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
+      runner-amd64: "arc-runner-set-stateless"
+      build-arm64: false
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -38,6 +42,8 @@ jobs:
       docker-file: dockerfiles/service/Dockerfile
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
+      runner-amd64: "arc-runner-set-stateless"
+      build-arm64: false
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

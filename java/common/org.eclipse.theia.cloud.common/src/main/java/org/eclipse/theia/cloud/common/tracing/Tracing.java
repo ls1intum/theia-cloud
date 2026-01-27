@@ -129,37 +129,6 @@ public final class Tracing {
     }
 
     /**
-     * Finishes a transaction.
-     */
-    public static void finish(ITransaction tx, SpanStatus status) {
-        if (tx != null) {
-            tx.setStatus(status);
-            tx.finish();
-        }
-    }
-
-    /**
-     * Finishes a transaction with success.
-     */
-    public static void finishSuccess(ITransaction tx) {
-        finish(tx, SpanStatus.OK);
-    }
-
-    /**
-     * Finishes a transaction with error.
-     */
-    public static void finishError(ITransaction tx, Throwable error) {
-        if (tx != null) {
-            tx.setStatus(SpanStatus.INTERNAL_ERROR);
-            if (error != null) {
-                tx.setThrowable(error);
-                Sentry.captureException(error);
-            }
-            tx.finish();
-        }
-    }
-
-    /**
      * Executes a supplier within a span, automatically finishing it.
      */
     public static <T> T traced(ISpan parent, String operation, String description, Supplier<T> action) {

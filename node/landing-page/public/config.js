@@ -48,15 +48,15 @@ window.theiaCloudConfig = {
     },
     bugReport: {
       text: 'Report a bug',
-      url: 'https://github.com/eclipse-theia/theia-cloud/issues'
+      url: 'https://github.com/ls1intum/theia-cloud/issues'
     },
     featureRequest: {
       text: 'Request a feature',
-      url: 'https://github.com/eclipse-theia/theia-cloud/issues'
+      url: 'https://github.com/ls1intum/theia-cloud/issues'
     },
     about: {
       text: 'About',
-      url: 'https://ase-website-test.ase.cit.tum.de/'
+      url: 'https://aet.cit.tum.de/'
     }
   },
   // Keycloak configuration - only used when useKeycloak: true

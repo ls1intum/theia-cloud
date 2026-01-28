@@ -49,7 +49,7 @@ export const Footer = ({ selectedAppDefinition, onNavigate, footerLinks }: Foote
             🐞 {footerLinks.bugReport.text}
             </a>
           ) : (
-            <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>🐞 Report a bug</a>
+            <a target='_blank' href='https://github.com/ls1intum/theia-cloud/issues' rel='noreferrer'>🐞 Report a bug</a>
           )}
           {' or '}
           {footerLinks?.featureRequest ? (
@@ -61,7 +61,7 @@ export const Footer = ({ selectedAppDefinition, onNavigate, footerLinks }: Foote
             💡 {footerLinks.featureRequest.text}
             </a>
           ) : (
-            <a target='_blank' href='https://github.com/eclipse-theia/theia-cloud/issues' rel='noreferrer'>💡 Request a feature</a>
+            <a target='_blank' href='https://github.com/ls1intum/theia-cloud/issues' rel='noreferrer'>💡 Request a feature</a>
           )}
         </div>
 
@@ -76,7 +76,7 @@ export const Footer = ({ selectedAppDefinition, onNavigate, footerLinks }: Foote
               {footerLinks.about.text}
             </a>
           ) : (
-            <a href='https://ase-website-test.ase.cit.tum.de/' target='_blank' rel='noreferrer' className='App__footer__link'>About</a>
+            <a href='https://aet.cit.tum.de/' target='_blank' rel='noreferrer' className='App__footer__link'>About</a>
           )}
           <span className='App__footer__separator'>|</span>
           <button onClick={() => handleNavigation('imprint')} className='App__footer__link App__footer__button'>Imprint</button>

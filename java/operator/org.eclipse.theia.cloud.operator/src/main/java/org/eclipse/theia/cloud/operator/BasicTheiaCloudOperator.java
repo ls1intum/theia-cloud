@@ -353,14 +353,27 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
                 event = state.queue.poll();
                 if (event == null) {
                     state.running = false;
-                    // Cleanup is synchronized with enqueue to avoid losing events.
-                    if (state.queue.isEmpty()) {
-                        sessionStates.remove(uid, state);
-                    }
-                    return;
+                    break;
                 }
             }
             handleSessionEvent(event);
+        }
+        tryCleanupSessionState(uid, state);
+    }
+
+    private void tryCleanupSessionState(String uid, SessionState state) {
+        SessionState currentState = sessionStates.get(uid);
+        if (currentState == null) {
+            return;
+        }
+        synchronized (currentState.lock) {
+            if (currentState != state) {
+                return;
+            }
+            if (!currentState.queue.isEmpty() || currentState.running) {
+                return;
+            }
+            sessionStates.remove(uid, currentState);
         }
     }
 

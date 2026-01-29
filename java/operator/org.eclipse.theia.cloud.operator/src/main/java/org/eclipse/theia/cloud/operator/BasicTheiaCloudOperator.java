@@ -240,18 +240,12 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         
         ISpan span = null;
         try {
-            // Start transaction: continue trace if context exists, otherwise start new
-            if (traceContext.isPresent()) {
-                String name = "session." + action.name().toLowerCase();
-                String operation = action.name() + " session " + session.getSpec().getName();
-                span = Tracing.continueTrace(traceContext.get(), name, operation);
-            } else {
-                // No trace context - start new transaction (backward compatibility)
-                span = Tracing.startTransaction("session." + action.name().toLowerCase(), "session");
-                span.setTag("session.name", session.getSpec().getName());
-                span.setTag("app_definition", session.getSpec().getAppDefinition());
-                span.setTag("user", session.getSpec().getUser());
-            }
+            String name = "session." + action.name().toLowerCase();
+            String operation = action.name() + " session " + session.getSpec().getName();
+            span = Tracing.continueTraceAsync(traceContext, name, operation);
+            span.setTag("session.name", session.getSpec().getName());
+            span.setTag("app_definition", session.getSpec().getAppDefinition());
+            span.setTag("user", session.getSpec().getUser());
             
             span.setTag("action", action.name());
             span.setData("correlation_id", correlationId);
@@ -295,18 +289,12 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
         ISpan span = null;
         try {
-            // Start transaction: continue trace if context exists, otherwise start new
-            if (traceContext.isPresent()) {
-                String name = "session." + event.action.name().toLowerCase();
-                String operation = event.action.name() + " session " + event.session.getSpec().getName();
-                span = Tracing.continueTrace(traceContext.get(), name, operation);
-            } else {
-                // No trace context - start new transaction (backward compatibility)
-                span = Tracing.startTransaction("session." + event.action.name().toLowerCase(), "session");
-                span.setTag("session.name", event.session.getSpec().getName());
-                span.setTag("app_definition", event.session.getSpec().getAppDefinition());
-                span.setTag("user", event.session.getSpec().getUser());
-            }
+            String name = "session." + event.action.name().toLowerCase();
+            String operation = event.action.name() + " session " + event.session.getSpec().getName();
+            span = Tracing.continueTraceAsync(traceContext, name, operation);
+            span.setTag("session.name", event.session.getSpec().getName());
+            span.setTag("app_definition", event.session.getSpec().getAppDefinition());
+            span.setTag("user", event.session.getSpec().getUser());
 
             span.setTag("action", event.action.name());
             span.setData("correlation_id", event.correlationId);

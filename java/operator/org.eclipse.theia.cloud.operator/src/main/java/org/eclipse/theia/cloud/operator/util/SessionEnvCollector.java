@@ -18,6 +18,7 @@ import com.google.inject.Singleton;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Secret;
+import io.sentry.Sentry;
 
 /**
  * Collects environment variables for a session from various sources: direct env vars, ConfigMaps, and Secrets.
@@ -110,7 +111,7 @@ public class SessionEnvCollector {
                         result.put(entry.getKey(), decodedValue);
                         successCount++;
                     } catch (IllegalArgumentException e) {
-                        SentryHelper.captureError(e, secretName, correlationId);
+                        Sentry.captureException(e);
                         LOGGER.warn(formatLogMessage(correlationId, "Failed to decode Base64 value for key '"
                                 + entry.getKey() + "' in Secret: " + secretName), e);
                     }

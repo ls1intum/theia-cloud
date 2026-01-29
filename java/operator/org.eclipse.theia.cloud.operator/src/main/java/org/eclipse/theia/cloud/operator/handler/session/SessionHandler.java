@@ -17,24 +17,26 @@ package org.eclipse.theia.cloud.operator.handler.session;
 
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 
+import io.sentry.ISpan;
+
 public interface SessionHandler {
-    default boolean sessionAdded(Session session, String correlationId) {
+    default boolean sessionAdded(Session session, String correlationId, ISpan span) {
         return true;
     }
 
-    default boolean sessionDeleted(Session session, String correlationId) {
+    default boolean sessionDeleted(Session session, String correlationId, ISpan span) {
         return true;
     }
 
-    default boolean sessionModified(Session session, String correlationId) {
+    default boolean sessionModified(Session session, String correlationId, ISpan span) {
         return true;
     }
 
-    default boolean sessionErrored(Session session, String correlationId) {
+    default boolean sessionErrored(Session session, String correlationId, ISpan span) {
         return true;
     }
 
-    default boolean sessionBookmarked(Session session, String correlationId) {
+    default boolean sessionBookmarked(Session session, String correlationId, ISpan span) {
         return true;
     }
 }

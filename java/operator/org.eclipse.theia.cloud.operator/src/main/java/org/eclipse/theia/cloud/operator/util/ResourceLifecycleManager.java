@@ -24,6 +24,8 @@ import org.eclipse.theia.cloud.operator.util.OwnershipManager.OwnerContext;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
+
 import io.sentry.ISpan;
 import io.sentry.Sentry;
 import io.sentry.SpanStatus;
@@ -251,14 +253,14 @@ public final class ResourceLifecycleManager {
                     ctx.createResource.accept(instanceId);
                     created++;
                     if (createSpan != null) {
-                        SentryHelper.finishSuccess(createSpan);
+                        Tracing.finishSuccess(createSpan);
                     }
                 } catch (Exception e) {
                     LOGGER.error(formatLogMessage(ctx.correlationId,
                             "Failed to create " + ctx.resourceTypeName + " for instance " + instanceId), e);
                     success = false;
                     if (createSpan != null) {
-                        SentryHelper.finishError(createSpan, e);
+                        Tracing.finishError(createSpan, e);
                     }
                 }
             }
@@ -295,14 +297,14 @@ public final class ResourceLifecycleManager {
                             LOGGER.info(formatLogMessage(ctx.correlationId,
                                     "Deleted excess " + ctx.resourceTypeName + " " + resourceName));
                             if (deleteSpan != null) {
-                                SentryHelper.finishSuccess(deleteSpan);
+                                Tracing.finishSuccess(deleteSpan);
                             }
                         } catch (Exception e) {
                             LOGGER.error(formatLogMessage(ctx.correlationId,
                                     "Failed to delete " + ctx.resourceTypeName + " " + resourceName), e);
                             success = false;
                             if (deleteSpan != null) {
-                                SentryHelper.finishError(deleteSpan, e);
+                                Tracing.finishError(deleteSpan, e);
                             }
                         }
                     } else if (OwnershipManager.hasAdditionalOwners(resource, ctx.owner)) {
@@ -324,14 +326,14 @@ public final class ResourceLifecycleManager {
                             LOGGER.info(formatLogMessage(ctx.correlationId, "Removed owner from " + ctx.resourceTypeName
                                     + " " + resourceName + " (has other owners)"));
                             if (removeOwnerSpan != null) {
-                                SentryHelper.finishSuccess(removeOwnerSpan);
+                                Tracing.finishSuccess(removeOwnerSpan);
                             }
                         } catch (Exception e) {
                             LOGGER.error(formatLogMessage(ctx.correlationId,
                                     "Failed to remove owner from " + ctx.resourceTypeName + " " + resourceName), e);
                             success = false;
                             if (removeOwnerSpan != null) {
-                                SentryHelper.finishError(removeOwnerSpan, e);
+                                Tracing.finishError(removeOwnerSpan, e);
                             }
                         }
                     } else {
@@ -360,14 +362,14 @@ public final class ResourceLifecycleManager {
                             LOGGER.info(formatLogMessage(ctx.correlationId,
                                     "Recreated " + ctx.resourceTypeName + " " + resourceName));
                             if (recreateSpan != null) {
-                                SentryHelper.finishSuccess(recreateSpan);
+                                Tracing.finishSuccess(recreateSpan);
                             }
                         } catch (Exception e) {
                             LOGGER.error(formatLogMessage(ctx.correlationId,
                                     "Failed to recreate " + ctx.resourceTypeName + " " + resourceName), e);
                             success = false;
                             if (recreateSpan != null) {
-                                SentryHelper.finishError(recreateSpan, e);
+                                Tracing.finishError(recreateSpan, e);
                             }
                         }
                     } else {
@@ -395,7 +397,7 @@ public final class ResourceLifecycleManager {
 
         } catch (Exception e) {
             if (span != null) {
-                SentryHelper.finishError(span, e);
+                Tracing.finishError(span, e);
             }
             throw e;
         }
@@ -453,14 +455,14 @@ public final class ResourceLifecycleManager {
                         LOGGER.info(formatLogMessage(correlationId,
                                 "Deleted " + resourceTypeName + " " + resourceName + " (sole owner)"));
                         if (deleteSpan != null) {
-                            SentryHelper.finishSuccess(deleteSpan);
+                            Tracing.finishSuccess(deleteSpan);
                         }
                     } catch (Exception e) {
                         LOGGER.error(formatLogMessage(correlationId,
                                 "Failed to delete " + resourceTypeName + " " + resourceName), e);
                         success = false;
                         if (deleteSpan != null) {
-                            SentryHelper.finishError(deleteSpan, e);
+                            Tracing.finishError(deleteSpan, e);
                         }
                     }
                 } else if (OwnershipManager.hasAdditionalOwners(resource, owner)) {
@@ -482,14 +484,14 @@ public final class ResourceLifecycleManager {
                         LOGGER.info(formatLogMessage(correlationId,
                                 "Removed owner from " + resourceTypeName + " " + resourceName));
                         if (removeSpan != null) {
-                            SentryHelper.finishSuccess(removeSpan);
+                            Tracing.finishSuccess(removeSpan);
                         }
                     } catch (Exception e) {
                         LOGGER.error(formatLogMessage(correlationId,
                                 "Failed to remove owner from " + resourceTypeName + " " + resourceName), e);
                         success = false;
                         if (removeSpan != null) {
-                            SentryHelper.finishError(removeSpan, e);
+                            Tracing.finishError(removeSpan, e);
                         }
                     }
                 } else {
@@ -510,7 +512,7 @@ public final class ResourceLifecycleManager {
 
         } catch (Exception e) {
             if (span != null) {
-                SentryHelper.finishError(span, e);
+                Tracing.finishError(span, e);
             }
             throw e;
         }

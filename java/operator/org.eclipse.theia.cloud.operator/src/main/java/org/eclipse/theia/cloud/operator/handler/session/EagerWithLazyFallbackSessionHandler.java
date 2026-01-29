@@ -45,7 +45,7 @@ public class EagerWithLazyFallbackSessionHandler implements SessionHandler {
     public boolean sessionAdded(Session session, String correlationId, ISpan span) {
         // Try eager start first
         ISpan eagerSpan = Tracing.childSpan(span, "session.eager_attempt", "Attempt eager session start");
-        eagerSpan.setTag("agersession.strategy", "eager");
+        eagerSpan.setTag("eagersession.strategy", "eager");
 
         EagerSessionHandler.EagerSessionAddedOutcome eagerOutcome = eager.trySessionAdded(session, correlationId,
                 eagerSpan);

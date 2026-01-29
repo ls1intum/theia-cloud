@@ -150,142 +150,108 @@ public final class AddedHandlerUtil {
             span.setData("correlation_id", correlationId);
             span.setData("url", url);
 
-            long startTime = System.currentTimeMillis();
             boolean updateURL = false;
             int lastResponseCode = -1;
             String failureReason = null;
 
             try {
                 for (int i = 1; i <= 309; i++) {
-                    ISpan attemptSpan = Tracing.childSpan(span, "session.url_check_attempt", "URL availability check attempt " + i);
-                    attemptSpan.setData("attempt", i);
+                    /*
+                     * On the first 60 loops we will check every 500ms whether URL is available. This will take at
+                     * least 30s. On the next 60 loops we will check every 1000ms. This will take at least 60s. On
+                     * the next 24 loops we will check every 2500ms. This will take at least further 60s. On the
+                     * next 60 loops we will check every 5000ms. This will take at least further 5 minutes. If the
+                     * pod has not started within the first ~7 minutes, we will continue to check every 30 seconds.
+                     * We give up after an hour.
+                     */
+                    long sleepDuration;
+                    if (i <= 60) {
+                        sleepDuration = 500;
+                    } else if (i <= 120) {
+                        sleepDuration = 1000;
+                    } else if (i <= 144) {
+                        sleepDuration = 2500;
+                    } else if (i <= 204) {
+                        sleepDuration = 5000;
+                    } else {
+                        sleepDuration = 30000;
+                    }
                     
                     try {
+                        Thread.sleep(sleepDuration);
+                    } catch (InterruptedException e) {
+                        /* silent */
+                    }
+
+                    HttpsURLConnection connection;
+                    try {
+                        connection = (HttpsURLConnection) new URL(HOST_PROTOCOL + url).openConnection();
+                    } catch (IOException e) {
+                        LOGGER.error(formatLogMessage(correlationId, "Error while checking session availability."), e);
+                        failureReason = "connection_error";
+                        continue;
+                    }
+                    int code;
+
+                    try {
+                        connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);
+                        SSLContext sc = SSLContext.getInstance("SSL");
+                        sc.init(null, new TrustManager[] { TRUST_ALL_MANAGER }, new java.security.SecureRandom());
+                        HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+                        connection.setSSLSocketFactory(sc.getSocketFactory());
+                        connection.connect();
+                        code = connection.getResponseCode();
+                        lastResponseCode = code;
+                    } catch (IOException e) {
+                        LOGGER.error(formatLogMessage(correlationId, url + " is NOT available yet."), e);
+                        failureReason = "io_error";
+                        continue;
+                    } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                                "Error while checking session availability with SSL ignore."), e);
+                        failureReason = "ssl_error";
+                        continue;
+                    }
+
+                    LOGGER.trace(formatLogMessage(correlationId, url + " has response code " + code));
+
+                    if (code == 200) {
+                        updateURL = true;
+                    } else if (code != 404 && code != 503 && !updateURL) {
                         /*
-                         * On the first 60 loops we will check every 500ms whether URL is available. This will take at
-                         * least 30s. On the next 60 loops we will check every 1000ms. This will take at least 60s. On
-                         * the next 24 loops we will check every 2500ms. This will take at least further 60s. On the
-                         * next 60 loops we will check every 5000ms. This will take at least further 5 minutes. If the
-                         * pod has not started within the first ~7 minutes, we will continue to check every 30 seconds.
-                         * We give up after an hour.
+                         * we don't get a 404 or 503, so something is available. Try accessing the URL once more then
+                         * update URL anyway
                          */
-                        long sleepDuration;
-                        if (i <= 60) {
-                            sleepDuration = 500;
-                        } else if (i <= 120) {
-                            sleepDuration = 1000;
-                        } else if (i <= 144) {
-                            sleepDuration = 2500;
-                        } else if (i <= 204) {
-                            sleepDuration = 5000;
-                        } else {
-                            sleepDuration = 30000;
-                        }
-                        attemptSpan.setData("sleep_duration_ms", sleepDuration);
-                        
+                        updateURL = true;
+                        continue;
+                    }
+
+                    if (updateURL) {
+                        LOGGER.info(formatLogMessage(correlationId, url + " is available."));
+
+                        ISpan updateSpan = Tracing.childSpan(span, "session.update_status", "Update session URL status");
                         try {
-                            Thread.sleep(sleepDuration);
-                        } catch (InterruptedException e) {
-                            /* silent */
+                            sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
+                            Tracing.finishSuccess(updateSpan);
+                        } catch (Exception e) {
+                            Tracing.finishError(updateSpan, e);
                         }
 
-                        HttpsURLConnection connection;
-                        try {
-                            connection = (HttpsURLConnection) new URL(HOST_PROTOCOL + url).openConnection();
-                        } catch (IOException e) {
-                            LOGGER.error(formatLogMessage(correlationId, "Error while checking session availability."), e);
-                            failureReason = "connection_error";
-                            attemptSpan.setTag("error", "connection_error");
-                            attemptSpan.setThrowable(e);
-                            Tracing.finish(attemptSpan, SpanStatus.INTERNAL_ERROR);
-                            continue;
-                        }
-                        int code;
+                        LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));
 
-                        try {
-                            connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);
-                            SSLContext sc = SSLContext.getInstance("SSL");
-                            sc.init(null, new TrustManager[] { TRUST_ALL_MANAGER }, new java.security.SecureRandom());
-                            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-                            connection.setSSLSocketFactory(sc.getSocketFactory());
-                            connection.connect();
-                            code = connection.getResponseCode();
-                            lastResponseCode = code;
-                            attemptSpan.setData("response_code", code);
-                        } catch (IOException e) {
-                            LOGGER.error(formatLogMessage(correlationId, url + " is NOT available yet."), e);
-                            failureReason = "io_error";
-                            attemptSpan.setTag("error", "io_error");
-                            attemptSpan.setThrowable(e);
-                            Tracing.finish(attemptSpan, SpanStatus.UNAVAILABLE);
-                            continue;
-                        } catch (NoSuchAlgorithmException | KeyManagementException e) {
-                            LOGGER.error(formatLogMessage(correlationId,
-                                    "Error while checking session availability with SSL ignore."), e);
-                            failureReason = "ssl_error";
-                            attemptSpan.setTag("error", "ssl_error");
-                            attemptSpan.setThrowable(e);
-                            Tracing.finish(attemptSpan, SpanStatus.INTERNAL_ERROR);
-                            continue;
-                        }
-
-                        LOGGER.trace(formatLogMessage(correlationId, url + " has response code " + code));
-
-                        if (code == 200) {
-                            updateURL = true;
-                            attemptSpan.setTag("outcome", "success");
-                            Tracing.finishSuccess(attemptSpan);
-                        } else if (code != 404 && code != 503 && !updateURL) {
-                            /*
-                             * we don't get a 404 or 503, so something is available. Try accessing the URL once more then
-                             * update URL anyway
-                             */
-                            updateURL = true;
-                            attemptSpan.setTag("outcome", "partial_success");
-                            Tracing.finishSuccess(attemptSpan);
-                            continue;
-                        } else {
-                            attemptSpan.setTag("outcome", "not_ready");
-                            attemptSpan.setTag("response_code", String.valueOf(code));
-                            Tracing.finish(attemptSpan, SpanStatus.UNAVAILABLE);
-                        }
-
-                        if (updateURL) {
-                            LOGGER.info(formatLogMessage(correlationId, url + " is available."));
-
-                            ISpan updateSpan = Tracing.childSpan(span, "session.update_status", "Update session URL status");
-                            try {
-                                sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
-                                Tracing.finishSuccess(updateSpan);
-                            } catch (Exception e) {
-                                Tracing.finishError(updateSpan, e);
-                            }
-
-                            LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));
-
-                            long duration = System.currentTimeMillis() - startTime;
-                            span.setTag("outcome", "success");
-                            span.setData("attempts", i);
-                            span.setData("time_to_available_ms", duration);
-                            span.setData("final_response_code", code);
-                            Tracing.finishSuccess(span);
-                            return;
-                        } else {
-                            LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
-                        }
-                    } catch (Exception e) {
-                        attemptSpan.setTag("outcome", "error");
-                        attemptSpan.setThrowable(e);
-                        Tracing.finishError(attemptSpan, e);
-                        throw e;
+                        span.setTag("outcome", "success");
+                        span.setData("attempts", i);
+                        span.setData("final_response_code", code);
+                        Tracing.finishSuccess(span);
+                        return;
+                    } else {
+                        LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
                     }
                 }
 
                 // Exhausted all attempts
-                long duration = System.currentTimeMillis() - startTime;
                 span.setTag("outcome", "timeout");
                 span.setData("attempts", 309);
-                span.setData("duration_ms", duration);
                 span.setData("last_response_code", lastResponseCode);
                 if (failureReason != null) {
                     span.setTag("failure.reason", failureReason);

@@ -746,7 +746,6 @@ public class PrewarmedResourcePool {
                     .count();
             span.setData("pool.total_capacity", totalCapacity);
             span.setData("pool.available", availableCount);
-            span.setData("pool.utilization_pct", totalCapacity > 0 ? (int) ((1.0 - (double) availableCount / totalCapacity) * 100) : 0);;
 
             // Check if session already has a reservation
             Optional<Service> alreadyReservedExternal = TheiaCloudServiceUtil.getServiceOwnedBySession(sessionName,

@@ -20,6 +20,7 @@ import static org.eclipse.theia.cloud.common.util.LogMessageUtil.generateCorrela
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -27,13 +28,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -93,8 +92,7 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
     // Session event scheduling: per-session serialization, cross-session parallelism.
     private ExecutorService sessionExecutor;
-    private final Map<String, Deque<SessionEvent>> sessionEventQueues = new ConcurrentHashMap<>();
-    private final Map<String, AtomicBoolean> sessionEventRunning = new ConcurrentHashMap<>();
+    private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
 
     @Override
     public void start() {
@@ -174,13 +172,18 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
     protected void scheduleSessionEvent(Watcher.Action action, String uid, String correlationId) {
         Session session = sessionCache.get(uid);
-        sessionEventQueues.computeIfAbsent(uid, k -> new ConcurrentLinkedDeque<>())
-                .add(new SessionEvent(action, correlationId, session));
-
-        // Ensure only one runner per session UID.
-        AtomicBoolean running = sessionEventRunning.computeIfAbsent(uid, k -> new AtomicBoolean(false));
-        if (running.compareAndSet(false, true)) {
-            sessionExecutor.execute(() -> drainSessionEvents(uid));
+        SessionState state = sessionStates.computeIfAbsent(uid, k -> new SessionState());
+        boolean shouldSchedule = false;
+        synchronized (state.lock) {
+            state.queue.add(new SessionEvent(action, correlationId, session));
+            // Ensure only one runner per session UID.
+            if (!state.running) {
+                state.running = true;
+                shouldSchedule = true;
+            }
+        }
+        if (shouldSchedule) {
+            sessionExecutor.execute(() -> drainSessionEvents(uid, state));
         }
     }
 
@@ -270,26 +273,50 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         if (event.session == null) {
             return;
         }
+        // Extract trace context from Session annotations (if propagated from service)
+        Optional<TraceContext> traceContext = TraceContext.fromMetadata(event.session.getMetadata());
+
+        ISpan span = null;
         try {
+            // Start transaction: continue trace if context exists, otherwise start new
+            if (traceContext.isPresent()) {
+                String name = "session." + event.action.name().toLowerCase();
+                String operation = event.action.name() + " session " + event.session.getSpec().getName();
+                span = Tracing.continueTrace(traceContext.get(), name, operation);
+            } else {
+                // No trace context - start new transaction (backward compatibility)
+                span = Tracing.startTransaction("session." + event.action.name().toLowerCase(), "session");
+                span.setTag("session.name", event.session.getSpec().getName());
+                span.setTag("app_definition", event.session.getSpec().getAppDefinition());
+                span.setTag("user", event.session.getSpec().getUser());
+            }
+
+            span.setTag("action", event.action.name());
+            span.setData("correlation_id", event.correlationId);
+
             switch (event.action) {
             case ADDED:
-                sessionHandler.sessionAdded(event.session, event.correlationId);
+                sessionHandler.sessionAdded(event.session, event.correlationId, span);
                 break;
             case DELETED:
-                sessionHandler.sessionDeleted(event.session, event.correlationId);
+                sessionHandler.sessionDeleted(event.session, event.correlationId, span);
                 break;
             case MODIFIED:
-                sessionHandler.sessionModified(event.session, event.correlationId);
+                sessionHandler.sessionModified(event.session, event.correlationId, span);
                 break;
             case ERROR:
-                sessionHandler.sessionErrored(event.session, event.correlationId);
+                sessionHandler.sessionErrored(event.session, event.correlationId, span);
                 break;
             case BOOKMARK:
-                sessionHandler.sessionBookmarked(event.session, event.correlationId);
+                sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
                 break;
             }
+            Tracing.finishSuccess(span);
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(event.correlationId, "Error while handling sessions"), e);
+            if (span != null) {
+                Tracing.finishError(span, e);
+            }
             if (!arguments.isContinueOnException()) {
                 System.exit(-1);
             }
@@ -302,47 +329,28 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
                 new ArrayBlockingQueue<>(SESSION_EVENT_QUEUE_SIZE), new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
-    private void drainSessionEvents(String uid) {
-        try {
-            while (true) {
-                SessionEvent event = pollSessionEvent(uid);
+    private void drainSessionEvents(String uid, SessionState state) {
+        while (true) {
+            SessionEvent event;
+            synchronized (state.lock) {
+                event = state.queue.poll();
                 if (event == null) {
-                    break;
+                    state.running = false;
+                    // Cleanup is synchronized with enqueue to avoid losing events.
+                    if (state.queue.isEmpty()) {
+                        sessionStates.remove(uid, state);
+                    }
+                    return;
                 }
-                handleSessionEvent(event);
             }
-        } finally {
-            AtomicBoolean running = sessionEventRunning.get(uid);
-            if (running != null) {
-                running.set(false);
-            }
-            // Handle race: an event can be enqueued after we observe "empty" but before running=false.
-            // In that case, the enqueuer sees running=true and won't schedule a drainer, so we must
-            // recheck after flipping the flag and reschedule if anything is pending.
-            if (hasPendingSessionEvents(uid)) {
-                AtomicBoolean retryRunning = sessionEventRunning.computeIfAbsent(uid, k -> new AtomicBoolean(false));
-                if (retryRunning.compareAndSet(false, true)) {
-                    sessionExecutor.execute(() -> drainSessionEvents(uid));
-                }
-            } else {
-                // Cleanup maps for idle sessions.
-                sessionEventQueues.remove(uid);
-                sessionEventRunning.remove(uid);
-            }
+            handleSessionEvent(event);
         }
     }
 
-    private SessionEvent pollSessionEvent(String uid) {
-        Deque<SessionEvent> queue = sessionEventQueues.get(uid);
-        if (queue != null) {
-            return queue.poll();
-        }
-        return null;
-    }
-
-    private boolean hasPendingSessionEvents(String uid) {
-        Deque<SessionEvent> queue = sessionEventQueues.get(uid);
-        return queue != null && !queue.isEmpty();
+    private static final class SessionState {
+        private final Deque<SessionEvent> queue = new ArrayDeque<>();
+        private final Object lock = new Object();
+        private boolean running;
     }
 
     private static final class SessionEvent {

@@ -10,6 +10,7 @@
 package org.eclipse.theia.cloud.common.tracing;
 
 import java.util.function.Supplier;
+import java.util.Optional;
 
 import io.sentry.ISpan;
 import io.sentry.ITransaction;
@@ -154,32 +155,43 @@ public final class Tracing {
     }
 
     /**
-     * Creates a child span in a different thread context (e.g., executor thread).
-     * Binds the parent span to the current Sentry scope so child spans are properly tracked.
+     * Continues a trace for async operations that run after the parent span is finished.
+     * Creates a new transaction linked to the same trace as the parent.
      * 
-     * This is necessary when creating spans in executor threads because Sentry's scope
-     * is thread-local. The parent span must be bound to the scope in the executor thread
-     * for child spans to appear correctly in Sentry traces.
+     * IMPORTANT: For async operations scheduled via executors, the parent span will typically
+     * be finished before the async task runs. You cannot create child spans from finished spans.
+     * Instead, extract TraceContext from the parent span BEFORE scheduling, then call this
+     * method in the async task to create a linked transaction.
      * 
-     * @param parent The parent span (can be null to start a new transaction)
-     * @param operation The operation name for the child span
-     * @param description The description for the child span
-     * @return The child span, bound to the current scope
+     * Usage pattern:
+     * <pre>
+     * // Before scheduling async task (while span is still active)
+     * Optional<TraceContext> traceContext = TraceContext.fromSpan(parentSpan);
+     * 
+     * executor.submit(() -> {
+     *     // In async task (parent span may be finished)
+     *     ISpan span = Tracing.continueTraceAsync(traceContext, "async.operation", "Async operation");
+     *     try {
+     *         // do work
+     *         Tracing.finishSuccess(span);
+     *     } catch (Exception e) {
+     *         Tracing.finishError(span, e);
+     *     }
+     * });
+     * </pre>
+     * 
+     * @param traceContext The trace context extracted from the parent span (use TraceContext.fromSpan())
+     * @param name The name for the new transaction
+     * @param operation The operation name
+     * @return A new transaction linked to the same trace, or a standalone transaction if context is empty
      */
-    public static ISpan childSpanInScope(ISpan parent, String operation, String description) {
-        // Bind parent to scope if it exists (important for executor threads)
-        // This ensures Sentry knows about the parent span in this thread's context
-        if (parent != null) {
-            Sentry.configureScope(scope -> {
-                scope.setActiveSpan(parent);
-            });
+    public static ISpan continueTraceAsync(Optional<TraceContext> traceContext, String name, String operation) {
+        if (traceContext.isPresent()) {
+            return continueTrace(traceContext.get(), name, operation);
         }
-        // Create child span - it will be automatically linked to parent
-        ISpan child = childSpan(parent, operation, description);
-        // Set child as active span on scope so it's tracked properly
-        Sentry.configureScope(scope -> {
-            scope.setActiveSpan(child);
-        });
-        return child;
+        // Fallback: start a new unlinked transaction
+        TransactionOptions options = new TransactionOptions();
+        options.setBindToScope(true);
+        return Sentry.startTransaction(name, operation, options);
     }
 }

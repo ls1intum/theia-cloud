@@ -138,10 +138,13 @@ public final class AddedHandlerUtil {
         String sessionName = session.getSpec().getName();
         String appDef = session.getSpec().getAppDefinition();
 
+        // Extract trace context BEFORE scheduling - the parent span will be finished by the time executor runs
+        java.util.Optional<org.eclipse.theia.cloud.common.tracing.TraceContext> traceContext = 
+            org.eclipse.theia.cloud.common.tracing.TraceContext.fromSpan(parentSpan);
+
         EXECUTOR.execute(() -> {
-            // Start a child span for the async URL availability check
-            // Use childSpanInScope to properly bind the span to Sentry's thread-local scope
-            ISpan span = Tracing.childSpanInScope(parentSpan, "session.url_availability", "session");
+            // Create a new transaction linked to the same trace (parent span is already finished)
+            ISpan span = Tracing.continueTraceAsync(traceContext, "session.url_availability", "URL availability check");
             span.setTag("session.name", sessionName);
             span.setTag("app_definition", appDef);
             span.setData("correlation_id", correlationId);

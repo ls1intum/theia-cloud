@@ -121,6 +121,31 @@ public final class TraceContext {
     }
 
     /**
+     * Extracts trace context from a specific span.
+     * Use this to capture context before scheduling async tasks, so the async task
+     * can continue the same trace even after the original span is finished.
+     */
+    public static Optional<TraceContext> fromSpan(ISpan span) {
+        if (span == null) {
+            return Optional.empty();
+        }
+
+        // Get the sentry-trace header from the span
+        SentryTraceHeader traceHeader = span.toSentryTrace();
+        if (traceHeader == null) {
+            return Optional.empty();
+        }
+
+        String sentryTrace = traceHeader.getValue();
+        
+        // Get baggage header for Dynamic Sampling Context
+        BaggageHeader baggageHeader = span.toBaggageHeader(null);
+        String baggage = baggageHeader != null ? baggageHeader.getValue() : null;
+
+        return Optional.of(new TraceContext(sentryTrace, baggage));
+    }
+
+    /**
      * Extracts trace context from Kubernetes resource annotations.
      */
     public static Optional<TraceContext> fromAnnotations(Map<String, String> annotations) {

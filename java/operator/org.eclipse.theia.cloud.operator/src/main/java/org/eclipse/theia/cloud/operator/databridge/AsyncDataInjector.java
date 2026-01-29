@@ -19,10 +19,12 @@ import com.google.inject.Singleton;
 
 import io.sentry.ISpan;
 import io.sentry.SpanStatus;
+import org.eclipse.theia.cloud.common.tracing.TraceContext;
 import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 /**
- * Handles asynchronous data injection into sessions via the data bridge. Polls the health endpoint until the data
+ * Handles asynchronous data injection into sessions via the data bridge. Polls
+ * the health endpoint until the data
  * bridge is ready, then injects data once.
  */
 @Singleton
@@ -46,7 +48,8 @@ public class AsyncDataInjector {
     }
 
     /**
-     * Schedules asynchronous data injection for a session. Polls the health endpoint until ready, then injects data
+     * Schedules asynchronous data injection for a session. Polls the health
+     * endpoint until ready, then injects data
      * once.
      * 
      * @param parentSpan    The parent span to create a child span from for tracing
@@ -54,17 +57,22 @@ public class AsyncDataInjector {
      * @param envVars       The environment variables to inject
      * @param correlationId For logging/tracing
      */
-    public void scheduleInjection(ISpan parentSpan, Session session, Map<String, String> envVars, String correlationId) {
+    public void scheduleInjection(ISpan parentSpan, Session session, Map<String, String> envVars,
+            String correlationId) {
         String sessionName = session.getSpec().getName();
         String appDef = session.getSpec().getAppDefinition();
         int envVarCount = envVars.size();
 
         LOGGER.info(formatLogMessage(correlationId, "Scheduling async data injection for session: " + sessionName));
 
+        // Extract trace context BEFORE scheduling - the parent span will be finished by
+        // the time scheduler runs
+        Optional<TraceContext> traceContext = TraceContext.fromSpan(parentSpan);
+
         scheduler.submit(() -> {
-            // Start a child span for the async operation
-            // Use childSpanInScope to properly bind the span to Sentry's thread-local scope
-            ISpan span = Tracing.childSpanInScope(parentSpan, "databridge.inject", "databridge");
+            // Create a new transaction linked to the same trace (parent span is already
+            // finished)
+            ISpan span = Tracing.continueTraceAsync(traceContext, "databridge.inject", "Data bridge injection");
             span.setTag("session.name", sessionName);
             span.setTag("app_definition", appDef);
             span.setData("correlation_id", correlationId);
@@ -75,13 +83,15 @@ public class AsyncDataInjector {
     }
 
     /**
-     * Polls the health endpoint and injects data when ready. Recursively schedules itself for retries.
+     * Polls the health endpoint and injects data when ready. Recursively schedules
+     * itself for retries.
      * 
-     * @param parentSpan The parent span from scheduleInjection - all health checks are siblings under this span
-     * @param session The session to inject data into
-     * @param envVars The environment variables to inject
+     * @param parentSpan    The parent span from scheduleInjection - all health
+     *                      checks are siblings under this span
+     * @param session       The session to inject data into
+     * @param envVars       The environment variables to inject
      * @param correlationId For logging/tracing
-     * @param attempt The current attempt number (0-indexed)
+     * @param attempt       The current attempt number (0-indexed)
      */
     private void pollHealthThenInject(ISpan parentSpan, Session session, Map<String, String> envVars,
             String correlationId, int attempt) {
@@ -97,8 +107,10 @@ public class AsyncDataInjector {
             return;
         }
 
-        // Check if data bridge is healthy - each attempt is a sibling span under parentSpan
-        ISpan healthSpan = Tracing.childSpan(parentSpan, "databridge.health_check", "Health check attempt " + (attempt + 1));
+        // Check if data bridge is healthy - each attempt is a sibling span under
+        // parentSpan
+        ISpan healthSpan = Tracing.childSpan(parentSpan, "databridge.health_check",
+                "Health check attempt " + (attempt + 1));
         healthSpan.setData("attempt", attempt + 1);
 
         boolean healthy = dataBridgeClient.healthCheck(sessionName, correlationId);
@@ -157,7 +169,8 @@ public class AsyncDataInjector {
             return;
         }
 
-        // Not ready - schedule next health check (pass parentSpan through so all attempts are siblings)
+        // Not ready - schedule next health check (pass parentSpan through so all
+        // attempts are siblings)
         if (attempt == 0) {
             LOGGER.debug(formatLogMessage(correlationId,
                     "Data bridge not ready yet for session: " + sessionName + ", polling..."));
@@ -168,7 +181,8 @@ public class AsyncDataInjector {
     }
 
     /**
-     * Shuts down the scheduler. Should be called when the operator is shutting down.
+     * Shuts down the scheduler. Should be called when the operator is shutting
+     * down.
      */
     public void shutdown() {
         scheduler.shutdown();

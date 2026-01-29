@@ -59,6 +59,7 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     private static final ScheduledExecutorService STOP_EXECUTOR = Executors.newSingleThreadScheduledExecutor();
     private static final ScheduledExecutorService WATCH_EXECUTOR = Executors.newSingleThreadScheduledExecutor();
     private static final int SESSION_EVENT_QUEUE_SIZE = 1000;
+    private static final long SESSION_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30L;
 
     private static final Logger LOGGER = LogManager.getLogger(BasicTheiaCloudOperator.class);
 
@@ -104,6 +105,22 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
         STOP_EXECUTOR.scheduleWithFixedDelay(this::stopTimedOutSessions, 1, 1, TimeUnit.MINUTES);
         WATCH_EXECUTOR.scheduleWithFixedDelay(this::lookForIdleWatches, 1, 1, TimeUnit.MINUTES);
+    }
+
+    @Override
+    public void stop() {
+        if (sessionExecutor == null) {
+            return;
+        }
+        sessionExecutor.shutdown();
+        try {
+            if (!sessionExecutor.awaitTermination(SESSION_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                sessionExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            sessionExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     protected SpecWatch<AppDefinition> initAppDefinitionsAndWatchForChanges() {

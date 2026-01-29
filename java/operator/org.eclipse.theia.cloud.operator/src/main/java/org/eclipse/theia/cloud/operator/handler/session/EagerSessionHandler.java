@@ -105,12 +105,27 @@ public class EagerSessionHandler implements SessionHandler {
         LOGGER.info(formatLogMessage(correlationId, "Handling sessionAdded " + spec));
 
         try {
+            SessionStatusUtil.PreHandleResult preHandle = SessionStatusUtil.evaluateStatus(session, client,
+                    correlationId, LOGGER);
+            if (preHandle == SessionStatusUtil.PreHandleResult.ALREADY_HANDLED) {
+                span.setTag("outcome", "already_handled");
+                Tracing.finish(span, SpanStatus.OK);
+                return EagerSessionAddedOutcome.HANDLED;
+            }
+            if (preHandle == SessionStatusUtil.PreHandleResult.INTERRUPTED
+                    || preHandle == SessionStatusUtil.PreHandleResult.PREVIOUS_ERROR) {
+                span.setTag("outcome", "previous_error");
+                Tracing.finish(span, SpanStatus.ABORTED);
+                return EagerSessionAddedOutcome.ERROR;
+            }
+
             // Find app definition
             ISpan appDefSpan = Tracing.childSpan(span, "eager.find_appdef", "Find app definition");
             Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
             if (appDefOpt.isEmpty()) {
                 LOGGER.error(
                         formatLogMessage(correlationId, "No App Definition with name " + appDefinitionID + " found."));
+                SessionStatusUtil.markError(client, session, correlationId, "App Definition not found.");
                 appDefSpan.setTag("outcome", "not_found");
                 Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
                 span.setTag("outcome", "error");
@@ -126,6 +141,7 @@ public class EagerSessionHandler implements SessionHandler {
             if (ingressOpt.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No Ingress for app definition " + appDefinitionID + " found."));
+                SessionStatusUtil.markError(client, session, correlationId, "Ingress not available.");
                 ingressSpan.setTag("outcome", "not_found");
                 Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
                 span.setTag("outcome", "error");
@@ -148,6 +164,7 @@ public class EagerSessionHandler implements SessionHandler {
                 return EagerSessionAddedOutcome.NO_CAPACITY;
             }
             if (reservation.getOutcome() == ReservationOutcome.ERROR) {
+                SessionStatusUtil.markError(client, session, correlationId, "Failed to reserve prewarmed instance.");
                 reserveSpan.setTag("outcome", "error");
                 Tracing.finish(reserveSpan, SpanStatus.INTERNAL_ERROR);
                 span.setTag("outcome", "error");
@@ -168,6 +185,7 @@ public class EagerSessionHandler implements SessionHandler {
             ISpan setupSpan = Tracing.childSpan(span, "eager.complete_setup", "Complete session setup");
             setupSpan.setData("instance_id", instance.getInstanceId());
             if (!pool.completeSessionSetup(session, appDef, instance, correlationId)) {
+                SessionStatusUtil.markError(client, session, correlationId, "Failed to complete session setup.");
                 setupSpan.setTag("outcome", "failure");
                 Tracing.finish(setupSpan, SpanStatus.INTERNAL_ERROR);
                 span.setTag("outcome", "error");
@@ -196,6 +214,7 @@ public class EagerSessionHandler implements SessionHandler {
                 Tracing.finishSuccess(ingressRuleSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Error while editing ingress"), e);
+                SessionStatusUtil.markError(client, session, correlationId, "Failed to edit ingress.");
                 Tracing.finishError(ingressRuleSpan, e);
                 span.setTag("outcome", "error");
                 Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
@@ -207,10 +226,13 @@ public class EagerSessionHandler implements SessionHandler {
             AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId, span);
 
             span.setData("instance_id", instance.getInstanceId());
+            SessionStatusUtil.markHandled(client, session, correlationId, null);
             Tracing.finishSuccess(span);
             return EagerSessionAddedOutcome.HANDLED;
 
         } catch (Exception e) {
+            SessionStatusUtil.markError(client, session, correlationId,
+                    "Unexpected error. Please check the logs for correlationId: " + correlationId);
             Tracing.finishError(span, e);
             throw e;
         }

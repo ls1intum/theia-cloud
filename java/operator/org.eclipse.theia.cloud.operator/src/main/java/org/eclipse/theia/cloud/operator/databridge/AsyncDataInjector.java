@@ -158,7 +158,7 @@ public class AsyncDataInjector {
                 Tracing.finishError(injectSpan, e);
                 span.setTag("outcome", "injection_failed");
                 span.setTag("failure.reason", "exception");
-                Tracing.finishError(span, e);
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             }
             return;
         }

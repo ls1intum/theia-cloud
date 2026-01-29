@@ -787,7 +787,9 @@ public class PrewarmedResourcePool {
                 }
                 String outcome = result.getOutcome() == ReservationOutcome.SUCCESS ? "success"
                         : result.getOutcome().name().toLowerCase();
-                SpanStatus status = result.getOutcome() == ReservationOutcome.SUCCESS ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR;
+                SpanStatus status = result.getOutcome() == ReservationOutcome.SUCCESS ? SpanStatus.OK
+                        : result.getOutcome() == ReservationOutcome.NO_CAPACITY ? SpanStatus.RESOURCE_EXHAUSTED
+                        : SpanStatus.INTERNAL_ERROR;
                 span.setTag("outcome", outcome);
                 Tracing.finish(span, status);
                 return result;

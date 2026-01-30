@@ -42,6 +42,9 @@ public final class TraceContext {
     private final String baggage;
 
     private TraceContext(String sentryTrace, String baggage) {
+        if (sentryTrace == null || sentryTrace.isEmpty()) {
+            throw new IllegalArgumentException("sentryTrace cannot be null or empty");
+        }
         this.sentryTrace = sentryTrace;
         this.baggage = baggage;
     }
@@ -74,33 +77,11 @@ public final class TraceContext {
     }
 
     /**
-     * Extracts the trace ID from the sentry-trace header.
-     */
-    public String getTraceId() {
-        if (sentryTrace == null) {
-            return null;
-        }
-        String[] parts = sentryTrace.split("-");
-        return parts.length > 0 ? parts[0] : null;
-    }
-
-    /**
-     * Extracts the span ID from the sentry-trace header.
-     */
-    public String getSpanId() {
-        if (sentryTrace == null) {
-            return null;
-        }
-        String[] parts = sentryTrace.split("-");
-        return parts.length > 1 ? parts[1] : null;
-    }
-
-    /**
      * Extracts trace context from the current Sentry span/transaction.
      * Uses Sentry's built-in methods to get properly formatted headers.
      */
     public static Optional<TraceContext> fromCurrent() {
-        ISpan current = Sentry.getSpan();
+        final ISpan current = Sentry.getSpan();
         if (current == null) {
             return Optional.empty();
         }
@@ -199,6 +180,11 @@ public final class TraceContext {
 
     @Override
     public String toString() {
-        return "TraceContext{sentryTrace=" + sentryTrace + ", baggage=" + (baggage != null ? "present" : "null") + "}";
+        return new StringBuilder("TraceContext{sentryTrace=")
+                .append(sentryTrace)
+                .append(", baggage=")
+                .append(baggage != null ? "present" : "null")
+                .append("}")
+                .toString();
     }
 }

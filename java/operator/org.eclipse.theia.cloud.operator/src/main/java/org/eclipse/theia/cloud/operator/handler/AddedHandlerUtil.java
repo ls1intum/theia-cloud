@@ -181,7 +181,10 @@ public final class AddedHandlerUtil {
                     try {
                         Thread.sleep(sleepDuration);
                     } catch (InterruptedException e) {
-                        /* silent */
+                        Thread.currentThread().interrupt();
+                        span.setTag("outcome", "cancelled");
+                        Tracing.finishError(span, e);
+                        return;
                     }
 
                     HttpsURLConnection connection;

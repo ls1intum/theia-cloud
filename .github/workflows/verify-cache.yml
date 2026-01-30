@@ -147,6 +147,20 @@ jobs:
     name: Verify Squid HTTPS Proxy (Extension Cache)
     runs-on: arc-runner-set-stateless-arm
     steps:
+      - name: Checkout for CA certificate
+        uses: actions/checkout@v4
+        with:
+          repository: ls1intum/artemis-theia-blueprints
+          sparse-checkout: |
+            certs/squid-proxy-ca.crt
+          sparse-checkout-cone-mode: false
+
+      - name: Install Squid CA Certificate
+        run: |
+          sudo cp certs/squid-proxy-ca.crt /usr/local/share/ca-certificates/squid-proxy-ca.crt
+          sudo update-ca-certificates
+          echo "✅ Squid CA certificate installed"
+
       - name: Squid Connectivity Check
         run: |
           PROXY_HTTP="http://squid.squid.svc.cluster.local:3128"
@@ -161,7 +175,6 @@ jobs:
           fi
           
           echo "Testing Squid HTTPS proxy ($PROXY_HTTPS)..."
-          # Port 3129 is SSL-bump proxy - test by making HTTPS request through it
           if curl -f -s -o /dev/null -x "$PROXY_HTTPS" https://www.google.com; then
             echo "✅ Squid HTTPS proxy (port 3129) is reachable"
           else
@@ -176,8 +189,6 @@ jobs:
           echo "Testing VSIX extension caching through Squid..."
           echo "This tests the primary use case: caching VS Code extensions"
           
-          # Test downloading a popular VS Code extension (ESLint)
-          # open-vsx.org is one of the domains Squid is configured to cache
           EXTENSION_URL="https://open-vsx.org/api/dbaeumer/vscode-eslint/2.4.4/file/dbaeumer.vscode-eslint-2.4.4.vsix"
           
           echo "First download (cache MISS expected)..."

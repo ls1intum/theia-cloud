@@ -233,7 +233,15 @@ public class TheiaCloudOperatorArguments {
     public long getMaxWatchIdleTime() {
         return maxWatchIdleTime;
     }
-
+    /**
+     * Gets the number of threads to use for session event handling.
+     * 
+     * If a specific thread count is configured and greater than zero, returns that value.
+     * Otherwise, calculates a default based on the number of available CPU cores,
+     * with a formula of (cores * 2) bounded within the range [4, 32].
+     * 
+     * @return the number of session handler threads
+     */
     public int getSessionHandlerThreads() {
         if (sessionHandlerThreads != null && sessionHandlerThreads > 0) {
             return sessionHandlerThreads;

@@ -29,9 +29,13 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
             CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
-          else
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             BASE_TAG="latest"
             CACHE_TAG="build-cache"
+          else
+            # For workflow_dispatch or push on feature branches
+            BASE_TAG="${{ github.ref_name }}"
+            CACHE_TAG="build-cache-${{ github.ref_name }}"
           fi
           
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"

@@ -157,6 +157,9 @@ jobs:
 
       - name: Install Squid CA Certificate
         run: |
+          ls -la
+          ls -la certs/ || echo "certs directory not found"
+          find . -name "squid-proxy-ca.crt" || echo "cert file not found"
           sudo cp certs/squid-proxy-ca.crt /usr/local/share/ca-certificates/squid-proxy-ca.crt
           sudo update-ca-certificates
           echo "✅ Squid CA certificate installed"

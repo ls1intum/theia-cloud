@@ -161,7 +161,8 @@ jobs:
           fi
           
           echo "Testing Squid HTTPS proxy ($PROXY_HTTPS)..."
-          if curl -f -s -o /dev/null "$PROXY_HTTPS"; then
+          # Port 3129 is SSL-bump proxy - test by making HTTPS request through it
+          if curl -f -s -o /dev/null -x "$PROXY_HTTPS" https://www.google.com; then
             echo "✅ Squid HTTPS proxy (port 3129) is reachable"
           else
             echo "❌ Squid HTTPS proxy (port 3129) is NOT reachable"

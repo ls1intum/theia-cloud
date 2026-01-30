@@ -143,10 +143,59 @@ jobs:
             echo '✅ NPM install tests passed'
           "
 
+  verify-squid-cache:
+    name: Verify Squid HTTPS Proxy (Extension Cache)
+    runs-on: arc-runner-set-stateless-arm
+    steps:
+      - name: Squid Connectivity Check
+        run: |
+          PROXY_HTTP="http://squid.squid.svc.cluster.local:3128"
+          PROXY_HTTPS="http://squid.squid.svc.cluster.local:3129"
+          
+          echo "Testing Squid HTTP proxy ($PROXY_HTTP)..."
+          if curl -f -s -o /dev/null -x "$PROXY_HTTP" http://www.google.com; then
+            echo "✅ Squid HTTP proxy (port 3128) is reachable"
+          else
+            echo "❌ Squid HTTP proxy (port 3128) is NOT reachable"
+            exit 1
+          fi
+          
+          echo "Testing Squid HTTPS proxy ($PROXY_HTTPS)..."
+          if curl -f -s -o /dev/null "$PROXY_HTTPS"; then
+            echo "✅ Squid HTTPS proxy (port 3129) is reachable"
+          else
+            echo "❌ Squid HTTPS proxy (port 3129) is NOT reachable"
+            exit 1
+          fi
+
+      - name: Functional Test - VSIX Extension Download
+        run: |
+          PROXY="http://squid.squid.svc.cluster.local:3129"
+          
+          echo "Testing VSIX extension caching through Squid..."
+          echo "This tests the primary use case: caching VS Code extensions"
+          
+          # Test downloading a popular VS Code extension (ESLint)
+          # open-vsx.org is one of the domains Squid is configured to cache
+          EXTENSION_URL="https://open-vsx.org/api/dbaeumer/vscode-eslint/2.4.4/file/dbaeumer.vscode-eslint-2.4.4.vsix"
+          
+          echo "First download (cache MISS expected)..."
+          time curl -f -s -o /dev/null \
+            -x "$PROXY" \
+            "$EXTENSION_URL"
+          
+          echo ""
+          echo "Second download (cache HIT expected - should be faster)..."
+          time curl -f -s -o /dev/null \
+            -x "$PROXY" \
+            "$EXTENSION_URL"
+          
+          echo "✅ Squid proxy successfully cached VSIX extension"
+
   report-status:
     name: Cache Health Report
     runs-on: arc-runner-set-stateless-arm
-    needs: [verify-apt-cache, verify-registry-mirrors, verify-npm-cache]
+    needs: [verify-apt-cache, verify-registry-mirrors, verify-npm-cache, verify-squid-cache]
     if: always()
     steps:
       - name: Generate Report
@@ -157,10 +206,12 @@ jobs:
           echo "| APT Cache     | ${{ needs.verify-apt-cache.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Mirror | ${{ needs.verify-registry-mirrors.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| NPM Cache     | ${{ needs.verify-npm-cache.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Squid Proxy   | ${{ needs.verify-squid-cache.result }} |" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ needs.verify-apt-cache.result }}" == "success" ] && \
              [ "${{ needs.verify-registry-mirrors.result }}" == "success" ] && \
-             [ "${{ needs.verify-npm-cache.result }}" == "success" ]; then
+             [ "${{ needs.verify-npm-cache.result }}" == "success" ] && \
+             [ "${{ needs.verify-squid-cache.result }}" == "success" ]; then
              echo "✅ **All Systems Operational**" >> $GITHUB_STEP_SUMMARY
           else
              echo "⚠️ **Issues Detected**" >> $GITHUB_STEP_SUMMARY

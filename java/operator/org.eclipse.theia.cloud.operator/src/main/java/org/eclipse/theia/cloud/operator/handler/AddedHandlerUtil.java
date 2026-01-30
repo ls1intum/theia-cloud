@@ -235,6 +235,12 @@ public final class AddedHandlerUtil {
                             Tracing.finishSuccess(updateSpan);
                         } catch (Exception e) {
                             Tracing.finishError(updateSpan, e);
+                            // Propagate failure to outer span
+                            span.setTag("outcome", "error");
+                            span.setData("attempts", i);
+                            span.setData("final_response_code", code);
+                            Tracing.finishError(span, e);
+                            return;
                         }
 
                         LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));

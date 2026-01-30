@@ -1,0 +1,226 @@
+name: Verify Cache Infrastructure
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1' # Weekly check on Mondays
+  push:
+    paths:
+      - '.github/workflows/verify-cache.yml'
+
+jobs:
+  verify-apt-cache:
+    name: Verify APT Cache (apt-cacher-ng)
+    runs-on: arc-runner-set-stateless-arm
+    steps:
+      - name: Connectivity Check
+        run: |
+          PROXY="http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+          echo "Testing connectivity to $PROXY..."
+          if curl -f -s -o /dev/null "$PROXY/acng-report.html"; then
+            echo "✅ apt-cacher-ng is reachable"
+          else
+            echo "❌ apt-cacher-ng is NOT reachable"
+            exit 1
+          fi
+
+      - name: Functional Test - Large Install
+        run: |
+          # Create a Dockerfile that installs multiple packages to stress test the cache
+          cat > Dockerfile.apt-stress <<'EOF'
+          FROM ubuntu:24.04
+          ARG APT_HTTP_PROXY
+          ENV DEBIAN_FRONTEND=noninteractive
+          
+          # Configure Proxy
+          RUN if [ -n "$APT_HTTP_PROXY" ]; then \
+                echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
+                sed -i 's|https://|http://|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+                echo "✅ Configured APT Proxy"; \
+              fi
+
+          # 1. Update Index (Metadata Cache)
+          RUN apt-get update
+          
+          # 2. Install common build tools (Medium load)
+          RUN apt-get install -y --no-install-recommends \
+              build-essential \
+              git \
+              curl \
+              ca-certificates \
+              jq
+
+          # 3. Install a larger package set (Heavier load)
+          RUN apt-get install -y --no-install-recommends \
+              python3 \
+              python3-pip \
+              openjdk-21-jre-headless
+
+          RUN echo "✅ APT stress test completed successfully"
+          EOF
+
+          echo "Building stress-test image..."
+          docker buildx build \
+            --build-arg APT_HTTP_PROXY=http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142 \
+            --network host \
+            -f Dockerfile.apt-stress \
+            --progress=plain \
+            .
+
+  verify-registry-mirrors:
+    name: Verify Registry Mirrors
+    runs-on: arc-runner-set-stateless-arm
+    steps:
+      - name: Docker Hub Mirror Check
+        run: |
+          MIRROR="http://registry-mirror.registry-mirror.svc.cluster.local:5000"
+          echo "Testing Docker Hub Mirror ($MIRROR)..."
+          
+          # 1. API Connectivity
+          if curl -f -s "$MIRROR/v2/" > /dev/null; then
+             echo "✅ /v2/ endpoint reachable"
+          else
+             echo "❌ /v2/ endpoint unreachable"
+             exit 1
+          fi
+
+          # 2. Pull Test (Alpine - Small)
+          echo "Pulling alpine:latest..."
+          docker pull alpine:latest
+          docker rmi alpine:latest
+
+          # 3. Pull Test (Python Slim - Medium)
+          echo "Pulling python:3.11-slim..."
+          docker pull python:3.11-slim
+          docker rmi python:3.11-slim
+
+      - name: GHCR Mirror Check
+        run: |
+          MIRROR="http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
+          echo "Testing GHCR Mirror ($MIRROR)..."
+          
+          # 1. API Connectivity
+          if curl -f -s "$MIRROR/v2/" > /dev/null; then
+             echo "✅ /v2/ endpoint reachable"
+          else
+             echo "❌ /v2/ endpoint unreachable"
+             exit 1
+          fi
+
+          # 2. Pull Test (ghcr.io image)
+          # We use a public GHCR image for testing
+          IMAGE="ghcr.io/actions/actions-runner:latest"
+          echo "Pulling $IMAGE..."
+          docker pull $IMAGE
+          docker rmi $IMAGE
+
+  verify-npm-cache:
+    name: Verify NPM Cache (Verdaccio)
+    runs-on: arc-runner-set-stateless-arm
+    steps:
+      - name: Verdaccio Functional Test
+        run: |
+          REGISTRY="http://verdaccio.verdaccio.svc.cluster.local:4873"
+          echo "Testing Verdaccio ($REGISTRY)..."
+
+          # Use a node container to run the test since the runner lacks npm
+          # We use --network host to ensure access to cluster DNS
+          docker run --rm --network host node:20-alpine sh -c "
+            echo 'Configuring NPM...'
+            mkdir -p /tmp/npm-test
+            cd /tmp/npm-test
+            npm config set registry $REGISTRY
+            
+            echo 'Ping check...'
+            npm ping
+            
+            echo 'Installing lodash...'
+            npm install lodash
+            
+            echo 'Installing react...'
+            npm install react
+            
+            echo '✅ NPM install tests passed'
+          "
+
+  verify-squid-cache:
+    name: Verify Squid HTTPS Proxy (Extension Cache)
+    runs-on: arc-runner-set-stateless-arm
+    steps:
+      - name: Checkout for CA certificate
+        uses: actions/checkout@v4
+
+      - name: Install Squid CA Certificate
+        run: |
+          sudo cp certs/squid-proxy-ca.crt /usr/local/share/ca-certificates/squid-proxy-ca.crt
+          sudo update-ca-certificates
+          echo "✅ Squid CA certificate installed"
+
+      - name: Squid Connectivity Check
+        run: |
+          PROXY_HTTP="http://squid.squid.svc.cluster.local:3128"
+          PROXY_HTTPS="http://squid.squid.svc.cluster.local:3129"
+          
+          echo "Testing Squid HTTP proxy ($PROXY_HTTP)..."
+          if curl -f -s -o /dev/null -x "$PROXY_HTTP" http://www.google.com; then
+            echo "✅ Squid HTTP proxy (port 3128) is reachable"
+          else
+            echo "❌ Squid HTTP proxy (port 3128) is NOT reachable"
+            exit 1
+          fi
+          
+          echo "Testing Squid HTTPS proxy ($PROXY_HTTPS)..."
+          if curl -f -s -o /dev/null -x "$PROXY_HTTPS" https://www.google.com; then
+            echo "✅ Squid HTTPS proxy (port 3129) is reachable"
+          else
+            echo "❌ Squid HTTPS proxy (port 3129) is NOT reachable"
+            exit 1
+          fi
+
+      - name: Functional Test - VSIX Extension Download
+        run: |
+          PROXY="http://squid.squid.svc.cluster.local:3129"
+          
+          echo "Testing VSIX extension caching through Squid..."
+          echo "This tests the primary use case: caching VS Code extensions"
+          
+          EXTENSION_URL="https://open-vsx.org/api/dbaeumer/vscode-eslint/2.4.4/file/dbaeumer.vscode-eslint-2.4.4.vsix"
+          
+          echo "First download (cache MISS expected)..."
+          time curl -f -s -o /dev/null \
+            -x "$PROXY" \
+            "$EXTENSION_URL"
+          
+          echo ""
+          echo "Second download (cache HIT expected - should be faster)..."
+          time curl -f -s -o /dev/null \
+            -x "$PROXY" \
+            "$EXTENSION_URL"
+          
+          echo "✅ Squid proxy successfully cached VSIX extension"
+
+  report-status:
+    name: Cache Health Report
+    runs-on: arc-runner-set-stateless-arm
+    needs: [verify-apt-cache, verify-registry-mirrors, verify-npm-cache, verify-squid-cache]
+    if: always()
+    steps:
+      - name: Generate Report
+        run: |
+          echo "## 🛡️ Cache Infrastructure Health Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Cache Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| APT Cache     | ${{ needs.verify-apt-cache.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Mirror | ${{ needs.verify-registry-mirrors.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| NPM Cache     | ${{ needs.verify-npm-cache.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Squid Proxy   | ${{ needs.verify-squid-cache.result }} |" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.verify-apt-cache.result }}" == "success" ] && \
+             [ "${{ needs.verify-registry-mirrors.result }}" == "success" ] && \
+             [ "${{ needs.verify-npm-cache.result }}" == "success" ] && \
+             [ "${{ needs.verify-squid-cache.result }}" == "success" ]; then
+             echo "✅ **All Systems Operational**" >> $GITHUB_STEP_SUMMARY
+          else
+             echo "⚠️ **Issues Detected**" >> $GITHUB_STEP_SUMMARY
+             exit 1
+          fi

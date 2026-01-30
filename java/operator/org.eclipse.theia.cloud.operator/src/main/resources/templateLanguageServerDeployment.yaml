@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: PLACEHOLDER_NAME
+  namespace: PLACEHOLDER_NAMESPACE
+  labels:
+    theia-cloud.io/component: language-server
+    theia-cloud.io/session: PLACEHOLDER_SESSION
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: PLACEHOLDER_NAME
+  template:
+    metadata:
+      labels:
+        app: PLACEHOLDER_NAME
+        theia-cloud.io/component: language-server
+        theia-cloud.io/session: PLACEHOLDER_SESSION
+    spec:
+      containers:
+        - name: language-server
+          image: PLACEHOLDER_IMAGE
+          imagePullPolicy: Always
+          ports:
+            - containerPort: PLACEHOLDER_PORT
+              name: lsp
+              protocol: TCP
+          resources:
+            limits:
+              cpu: "PLACEHOLDER_CPU_LIMIT"
+              memory: "PLACEHOLDER_MEMORY_LIMIT"
+            requests:
+              cpu: "PLACEHOLDER_CPU_REQUEST"
+              memory: "PLACEHOLDER_MEMORY_REQUEST"
+          volumeMounts: []
+      volumes: []

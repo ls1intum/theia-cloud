@@ -41,6 +41,7 @@ import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
 import org.eclipse.theia.cloud.operator.util.K8sResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudK8sUtil;
@@ -87,6 +88,9 @@ public class LazySessionHandler implements SessionHandler {
 
     @Inject
     protected IngressManager ingressManager;
+
+    @Inject
+    protected LanguageServerManager languageServerManager;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId) {
@@ -288,9 +292,15 @@ public class LazySessionHandler implements SessionHandler {
             deploymentSpan.setData("has_storage", storageName.isPresent());
             resourceFactory.createDeploymentForLazySession(
                     session, appDef, storageName, labels,
-                    deployment -> storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec)),
+                    deployment -> {
+                        storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec));
+                        languageServerManager.injectEnvVars(deployment, session, appDef, correlationId);
+                    },
                     correlationId);
             SentryHelper.finishSuccess(deploymentSpan);
+
+            // Create language server
+            languageServerManager.createLanguageServer(session, appDef, storageName, correlationId);
 
             // Add ingress rule
             ISpan ingressRuleSpan = tx.startChild("lazy.add_ingress_rule", "Add ingress rule");
@@ -398,6 +408,10 @@ public class LazySessionHandler implements SessionHandler {
             SentryHelper.finishSuccess(removeRulesSpan);
 
             LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up ingress rules for session"));
+
+            // Cleanup language server
+            languageServerManager.deleteLanguageServer(session, correlationId);
+
             tx.setTag("outcome", "success");
             tx.setStatus(SpanStatus.OK);
             tx.finish();

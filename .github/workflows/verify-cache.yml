@@ -2,207 +2,170 @@ name: Verify Cache Infrastructure
 
 on:
   workflow_dispatch:
-  pull_request:
+  schedule:
+    - cron: '0 6 * * 1' # Weekly check on Mondays
+  push:
     paths:
       - '.github/workflows/verify-cache.yml'
-      - 'dockerfiles/**'
 
 jobs:
   verify-apt-cache:
-    name: Verify APT Cache
+    name: Verify APT Cache (apt-cacher-ng)
     runs-on: arc-runner-set-stateless-arm
     steps:
-      - name: Test apt-cacher-ng connectivity
+      - name: Connectivity Check
         run: |
           PROXY="http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
-          
-          echo "Testing apt-cacher-ng connectivity..."
-          if ! curl -f -s -o /dev/null -w "%{http_code}" "$PROXY/acng-report.html" | grep -q "200"; then
-            echo "❌ apt-cacher-ng not responding"
-            exit 1
-          fi
-          echo "✅ apt-cacher-ng is responding"
-          
-          echo "Testing package list fetch via cache..."
-          if ! curl -f -x "$PROXY" "http://ports.ubuntu.com/ubuntu-ports/dists/noble/InRelease" > /dev/null 2>&1; then
-            echo "❌ Failed to fetch via apt-cacher-ng"
-            exit 1
-          fi
-          echo "✅ Successfully fetched package list via cache"
-          
-          echo "Verifying cache efficiency (second request should be faster)..."
-          TIME1=$(curl -x "$PROXY" -w "%{time_total}" -o /dev/null -s "http://ports.ubuntu.com/ubuntu-ports/dists/noble/InRelease" 2>&1)
-          sleep 1
-          TIME2=$(curl -x "$PROXY" -w "%{time_total}" -o /dev/null -s "http://ports.ubuntu.com/ubuntu-ports/dists/noble/InRelease" 2>&1)
-          
-          echo "First request: ${TIME1}s"
-          echo "Second request: ${TIME2}s"
-          
-          if (( $(echo "$TIME2 < $TIME1" | bc -l 2>/dev/null || echo "0") )); then
-            echo "✅ Cache is working (cached request faster: ${TIME2}s < ${TIME1}s)"
+          echo "Testing connectivity to $PROXY..."
+          if curl -f -s -o /dev/null "$PROXY/acng-report.html"; then
+            echo "✅ apt-cacher-ng is reachable"
           else
-            echo "⚠️  Cache timing inconclusive (first: ${TIME1}s, second: ${TIME2}s)"
+            echo "❌ apt-cacher-ng is NOT reachable"
+            exit 1
           fi
 
-      - name: Test Docker build with apt-cacher-ng
+      - name: Functional Test - Large Install
         run: |
-          cat > Dockerfile.test <<'EOF'
+          # Create a Dockerfile that installs multiple packages to stress test the cache
+          cat > Dockerfile.apt-stress <<'EOF'
           FROM ubuntu:24.04
           ARG APT_HTTP_PROXY
+          ENV DEBIAN_FRONTEND=noninteractive
+          
+          # Configure Proxy
           RUN if [ -n "$APT_HTTP_PROXY" ]; then \
                 echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
                 sed -i 's|https://|http://|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
-                sed -i 's|https://|http://|g' /etc/apt/sources.list 2>/dev/null || true; \
-                echo "Using APT Proxy with HTTP repositories"; \
+                echo "✅ Configured APT Proxy"; \
               fi
-          RUN apt-get update && apt-get install -y curl ca-certificates && rm -rf /var/lib/apt/lists/*
-          RUN echo "✅ APT cache test successful"
-          EOF
-          
-          docker buildx build \
-            --build-arg APT_HTTP_PROXY=http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142 \
-            --network host \
-            -f Dockerfile.test \
-            --progress=plain \
-            .
-          
-          echo "✅ Docker build with apt-cacher-ng succeeded"
 
-      - name: Test eclipse-temurin base image
-        run: |
-          cat > Dockerfile.temurin-test <<'EOF'
-          FROM eclipse-temurin:21-jdk
-          ARG APT_HTTP_PROXY
-          RUN if [ -n "$APT_HTTP_PROXY" ]; then \
-                echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
-                sed -i 's|https://|http://|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
-                sed -i 's|https://|http://|g' /etc/apt/sources.list 2>/dev/null || true; \
-                echo "Using APT Proxy with HTTP repositories"; \
-              fi
-          RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
-          RUN echo "✅ Eclipse Temurin with apt-cacher-ng test successful"
-          EOF
+          # 1. Update Index (Metadata Cache)
+          RUN apt-get update
           
+          # 2. Install common build tools (Medium load)
+          RUN apt-get install -y --no-install-recommends \
+              build-essential \
+              git \
+              curl \
+              ca-certificates \
+              jq
+
+          # 3. Install a larger package set (Heavier load)
+          RUN apt-get install -y --no-install-recommends \
+              python3 \
+              python3-pip \
+              openjdk-21-jre-headless
+
+          RUN echo "✅ APT stress test completed successfully"
+          EOF
+
+          echo "Building stress-test image..."
           docker buildx build \
             --build-arg APT_HTTP_PROXY=http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142 \
             --network host \
-            -f Dockerfile.temurin-test \
+            -f Dockerfile.apt-stress \
             --progress=plain \
             .
-          
-          echo "✅ Eclipse Temurin build with apt-cacher-ng succeeded"
 
   verify-registry-mirrors:
     name: Verify Registry Mirrors
     runs-on: arc-runner-set-stateless-arm
     steps:
-      - name: Test Docker Hub mirror connectivity
+      - name: Docker Hub Mirror Check
         run: |
           MIRROR="http://registry-mirror.registry-mirror.svc.cluster.local:5000"
+          echo "Testing Docker Hub Mirror ($MIRROR)..."
           
-          echo "Testing Docker Hub mirror connectivity..."
-          if curl -f -s "$MIRROR/v2/" > /dev/null 2>&1; then
-            echo "✅ Docker Hub mirror is responding"
+          # 1. API Connectivity
+          if curl -f -s "$MIRROR/v2/" > /dev/null; then
+             echo "✅ /v2/ endpoint reachable"
           else
-            echo "⚠️  Docker Hub mirror not responding (may be expected if not configured)"
+             echo "❌ /v2/ endpoint unreachable"
+             exit 1
           fi
 
-      - name: Test GHCR mirror connectivity
+          # 2. Pull Test (Alpine - Small)
+          echo "Pulling alpine:latest..."
+          docker pull alpine:latest
+          docker rmi alpine:latest
+
+          # 3. Pull Test (Python Slim - Medium)
+          echo "Pulling python:3.11-slim..."
+          docker pull python:3.11-slim
+          docker rmi python:3.11-slim
+
+      - name: GHCR Mirror Check
         run: |
           MIRROR="http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
+          echo "Testing GHCR Mirror ($MIRROR)..."
           
-          echo "Testing GHCR mirror connectivity..."
-          if curl -f -s "$MIRROR/v2/" > /dev/null 2>&1; then
-            echo "✅ GHCR mirror is responding"
+          # 1. API Connectivity
+          if curl -f -s "$MIRROR/v2/" > /dev/null; then
+             echo "✅ /v2/ endpoint reachable"
           else
-            echo "⚠️  GHCR mirror not responding (may be expected if not configured)"
+             echo "❌ /v2/ endpoint unreachable"
+             exit 1
           fi
 
-      - name: Test image pull
-        run: |
-          echo "Testing image pull (will use mirrors via buildx config)..."
-          if docker pull node:22-alpine > /dev/null 2>&1; then
-            echo "✅ Image pull successful"
-          else
-            echo "❌ Image pull failed"
-            exit 1
-          fi
+          # 2. Pull Test (ghcr.io image)
+          # We use a public GHCR image for testing
+          IMAGE="ghcr.io/actions/actions-runner:latest"
+          echo "Pulling $IMAGE..."
+          docker pull $IMAGE
+          docker rmi $IMAGE
 
   verify-npm-cache:
     name: Verify NPM Cache (Verdaccio)
     runs-on: arc-runner-set-stateless-arm
     steps:
-      - name: Test Verdaccio registry
+      - name: Verdaccio Functional Test
         run: |
           REGISTRY="http://verdaccio.verdaccio.svc.cluster.local:4873"
-          
-          echo "Testing Verdaccio connectivity..."
-          if curl -f -s "$REGISTRY" > /dev/null 2>&1; then
-            echo "✅ Verdaccio is responding"
+          echo "Testing Verdaccio ($REGISTRY)..."
+
+          # 1. Connectivity
+          if curl -f -s "$REGISTRY" > /dev/null; then
+            echo "✅ Verdaccio is reachable"
           else
-            echo "❌ Verdaccio not responding"
+            echo "❌ Verdaccio is NOT reachable"
             exit 1
           fi
+
+          # 2. Package Installation Test
+          mkdir -p /tmp/npm-test
+          cd /tmp/npm-test
           
-          echo "Testing package metadata fetch..."
-          mkdir -p /tmp/npm-test && cd /tmp/npm-test
+          # Configure project to use local registry
           echo "registry=$REGISTRY" > .npmrc
           
-          if npm view react version > /dev/null 2>&1; then
-            echo "✅ NPM cache working (package metadata accessible)"
-          else
-            echo "⚠️  NPM cache test inconclusive"
-          fi
+          echo "Installing 'lodash' (common utility)..."
+          npm install lodash
+          
+          echo "Installing 'react' (larger package)..."
+          npm install react
 
-  report-cache-stats:
-    name: Report Cache Statistics
+          echo "✅ NPM install tests passed"
+
+  report-status:
+    name: Cache Health Report
     runs-on: arc-runner-set-stateless-arm
     needs: [verify-apt-cache, verify-registry-mirrors, verify-npm-cache]
     if: always()
     steps:
-      - name: Collect cache statistics
+      - name: Generate Report
         run: |
-          echo "## 📊 Cache Infrastructure Status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Timestamp:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🛡️ Cache Infrastructure Health Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Cache Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| APT Cache     | ${{ needs.verify-apt-cache.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Mirror | ${{ needs.verify-registry-mirrors.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| NPM Cache     | ${{ needs.verify-npm-cache.result }} |" >> $GITHUB_STEP_SUMMARY
           
-          echo "### APT Cache (apt-cacher-ng)" >> $GITHUB_STEP_SUMMARY
-          if command -v kubectl > /dev/null 2>&1 && kubectl get pod -n apt-cacher-ng -l app=apt-cacher-ng > /dev/null 2>&1; then
-            POD=$(kubectl get pod -n apt-cacher-ng -l app=apt-cacher-ng -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-            if [ -n "$POD" ]; then
-              SIZE=$(kubectl exec -n apt-cacher-ng $POD -- du -sh /var/cache/apt-cacher-ng 2>/dev/null | awk '{print $1}' || echo "N/A")
-              UPTIME=$(kubectl get pod -n apt-cacher-ng $POD -o jsonpath='{.status.startTime}' 2>/dev/null || echo "N/A")
-              echo "- **Cache size:** $SIZE" >> $GITHUB_STEP_SUMMARY
-              echo "- **Pod:** \`$POD\`" >> $GITHUB_STEP_SUMMARY
-              echo "- **Started:** $UPTIME" >> $GITHUB_STEP_SUMMARY
-              echo "- **Status:** ${{ needs.verify-apt-cache.result }}" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- **Status:** Pod not found" >> $GITHUB_STEP_SUMMARY
-            fi
+          if [ "${{ needs.verify-apt-cache.result }}" == "success" ] && \
+             [ "${{ needs.verify-registry-mirrors.result }}" == "success" ] && \
+             [ "${{ needs.verify-npm-cache.result }}" == "success" ]; then
+             echo "✅ **All Systems Operational**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- **Status:** kubectl not available or pod not accessible" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Registry Mirrors" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Hub Mirror:** ${{ needs.verify-registry-mirrors.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **GHCR Mirror:** ${{ needs.verify-registry-mirrors.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### NPM Cache (Verdaccio)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ needs.verify-npm-cache.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ needs.verify-apt-cache.result }}" = "success" ] && \
-             [ "${{ needs.verify-registry-mirrors.result }}" = "success" ] && \
-             [ "${{ needs.verify-npm-cache.result }}" = "success" ]; then
-            echo "### ✅ All cache infrastructure checks passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ⚠️ Some cache infrastructure checks failed or were skipped" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Results:**" >> $GITHUB_STEP_SUMMARY
-            echo "- APT Cache: ${{ needs.verify-apt-cache.result }}" >> $GITHUB_STEP_SUMMARY
-            echo "- Registry Mirrors: ${{ needs.verify-registry-mirrors.result }}" >> $GITHUB_STEP_SUMMARY
-            echo "- NPM Cache: ${{ needs.verify-npm-cache.result }}" >> $GITHUB_STEP_SUMMARY
+             echo "⚠️ **Issues Detected**" >> $GITHUB_STEP_SUMMARY
+             exit 1
           fi

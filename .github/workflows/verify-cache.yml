@@ -147,20 +147,10 @@ jobs:
     name: Verify Squid HTTPS Proxy (Extension Cache)
     runs-on: arc-runner-set-stateless-arm
     steps:
-      - name: Checkout for CA certificate
-        uses: actions/checkout@v4
-        with:
-          repository: ls1intum/artemis-theia-blueprints
-          sparse-checkout: |
-            certs/squid-proxy-ca.crt
-          sparse-checkout-cone-mode: false
-
       - name: Install Squid CA Certificate
         run: |
-          ls -la
-          ls -la certs/ || echo "certs directory not found"
-          find . -name "squid-proxy-ca.crt" || echo "cert file not found"
-          sudo cp certs/squid-proxy-ca.crt /usr/local/share/ca-certificates/squid-proxy-ca.crt
+          curl -f -o squid-proxy-ca.crt https://raw.githubusercontent.com/ls1intum/artemis-theia-blueprints/master/certs/squid-proxy-ca.crt
+          sudo cp squid-proxy-ca.crt /usr/local/share/ca-certificates/squid-proxy-ca.crt
           sudo update-ca-certificates
           echo "✅ Squid CA certificate installed"
 

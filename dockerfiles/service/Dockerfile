@@ -1,4 +1,8 @@
 FROM eclipse-temurin:21-jdk AS builder
+# Copy apt proxy config if available (non-fatal if missing)
+RUN if [ -f .docker-build-config/01proxy ]; then \
+      cp .docker-build-config/01proxy /etc/apt/apt.conf.d/; \
+    fi
 RUN apt-get update && apt-get install -y maven
 WORKDIR /service
 COPY java/common ./common

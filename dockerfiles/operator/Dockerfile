@@ -4,7 +4,10 @@ ARG APT_HTTP_PROXY
 # Configure apt proxy if provided (hybrid: works on ARC and GitHub runners)
 RUN if [ -n "$APT_HTTP_PROXY" ]; then \
       echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
-      echo "Using APT Proxy: $APT_HTTP_PROXY"; \
+      # Force HTTP repositories when using proxy (Noble defaults to HTTPS which apt-cacher-ng cannot cache)
+      sed -i 's|https://|http://|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+      sed -i 's|https://|http://|g' /etc/apt/sources.list 2>/dev/null || true; \
+      echo "Using APT Proxy: $APT_HTTP_PROXY with HTTP repositories"; \
     else \
       echo "No APT Proxy set, using direct connection"; \
     fi

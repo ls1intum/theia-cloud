@@ -123,28 +123,25 @@ jobs:
           REGISTRY="http://verdaccio.verdaccio.svc.cluster.local:4873"
           echo "Testing Verdaccio ($REGISTRY)..."
 
-          # 1. Connectivity
-          if curl -f -s "$REGISTRY" > /dev/null; then
-            echo "✅ Verdaccio is reachable"
-          else
-            echo "❌ Verdaccio is NOT reachable"
-            exit 1
-          fi
-
-          # 2. Package Installation Test
-          mkdir -p /tmp/npm-test
-          cd /tmp/npm-test
-          
-          # Configure project to use local registry
-          echo "registry=$REGISTRY" > .npmrc
-          
-          echo "Installing 'lodash' (common utility)..."
-          npm install lodash
-          
-          echo "Installing 'react' (larger package)..."
-          npm install react
-
-          echo "✅ NPM install tests passed"
+          # Use a node container to run the test since the runner lacks npm
+          # We use --network host to ensure access to cluster DNS
+          docker run --rm --network host node:20-alpine sh -c "
+            echo 'Configuring NPM...'
+            mkdir -p /tmp/npm-test
+            cd /tmp/npm-test
+            npm config set registry $REGISTRY
+            
+            echo 'Ping check...'
+            npm ping
+            
+            echo 'Installing lodash...'
+            npm install lodash
+            
+            echo 'Installing react...'
+            npm install react
+            
+            echo '✅ NPM install tests passed'
+          "
 
   report-status:
     name: Cache Health Report

@@ -14,48 +14,92 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  determine-tag:
+    runs-on: arc-runner-set-stateless
+    outputs:
+      base_tag: ${{ steps.set-tag.outputs.base_tag }}
+      cache_tag: ${{ steps.set-tag.outputs.cache_tag }}
+    steps:
+      - name: Checkout for SHA access
+        uses: actions/checkout@v4
+
+      - name: Set tags
+        id: set-tag
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_TAG="pr-${{ github.event.pull_request.number }}"
+            CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
+          else
+            BASE_TAG="latest"
+            CACHE_TAG="build-cache"
+          fi
+          
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "cache_tag=${CACHE_TAG}" >> "$GITHUB_OUTPUT"
+
   build-and-push-landing-page:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets: inherit
 
   build-and-push-operator:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/operator/Dockerfile
       image-name: ghcr.io/ls1intum/theia/operator
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
 
   build-and-push-service:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/service/Dockerfile
       image-name: ghcr.io/ls1intum/theia/service
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/service:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: |
         SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

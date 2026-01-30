@@ -1,7 +1,12 @@
 FROM eclipse-temurin:21-jdk AS builder
-# Copy apt proxy config if available (non-fatal if missing)
-RUN if [ -f .docker-build-config/01proxy ]; then \
-      cp .docker-build-config/01proxy /etc/apt/apt.conf.d/; \
+# Accept APT_HTTP_PROXY build-arg for caching
+ARG APT_HTTP_PROXY
+# Configure apt proxy if provided (hybrid: works on ARC and GitHub runners)
+RUN if [ -n "$APT_HTTP_PROXY" ]; then \
+      echo "Acquire::http::Proxy \"$APT_HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
+      echo "Using APT Proxy: $APT_HTTP_PROXY"; \
+    else \
+      echo "No APT Proxy set, using direct connection"; \
     fi
 RUN apt-get update && apt-get install -y maven
 WORKDIR /conversion

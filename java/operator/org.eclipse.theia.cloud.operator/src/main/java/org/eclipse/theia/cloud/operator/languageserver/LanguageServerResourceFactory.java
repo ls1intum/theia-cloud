@@ -381,10 +381,18 @@ public class LanguageServerResourceFactory {
         podSpec.getVolumes().add(volume);
 
         Container lsContainer = podSpec.getContainers().get(0);
+        
+        String mountPath = TheiaCloudPersistentVolumeUtil.getMountPath(appDefSpec);
+        
         VolumeMount volumeMount = new VolumeMount();
         volumeMount.setName("workspace-data");
-        volumeMount.setMountPath(TheiaCloudPersistentVolumeUtil.getMountPath(appDefSpec));
+        volumeMount.setMountPath(mountPath);
         lsContainer.getVolumeMounts().add(volumeMount);
+        
+        lsContainer.getEnv().add(new EnvVarBuilder()
+            .withName("WORKSPACE_PATH")
+            .withValue(mountPath)
+            .build());
     }
 
     private Optional<Integer> findContainerIndex(Deployment deployment, String containerName) {

@@ -17,10 +17,14 @@ jobs:
       - name: Set release tag
         id: set-tag
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "release_tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
             echo "release_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "release_tag=latest" >> "$GITHUB_OUTPUT"
           else
-            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-push-base:

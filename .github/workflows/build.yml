@@ -53,7 +53,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       runner-amd64: "arc-runner-set-stateless"
-      runner-arm64: "arc-runner-set-arm64"
+      runner-arm64: "arc-runner-set-stateless-arm"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
@@ -76,7 +76,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       runner-amd64: "arc-runner-set-stateless"
-      runner-arm64: "arc-runner-set-arm64"
+      runner-arm64: "arc-runner-set-stateless-arm"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
@@ -101,7 +101,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       runner-amd64: "arc-runner-set-stateless"
-      runner-arm64: "arc-runner-set-arm64"
+      runner-arm64: "arc-runner-set-stateless-arm"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
       ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"

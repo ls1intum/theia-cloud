@@ -11,7 +11,7 @@ on:
 jobs:
   verify-apt-cache:
     name: Verify APT Cache (apt-cacher-ng)
-    runs-on: arc-runner-set-arm64
+    runs-on: arc-runner-set-stateless-arm
     steps:
       - name: Connectivity Check
         run: |
@@ -69,7 +69,7 @@ jobs:
 
   verify-registry-mirrors:
     name: Verify Registry Mirrors
-    runs-on: arc-runner-set-arm64
+    runs-on: arc-runner-set-stateless-arm
     steps:
       - name: Docker Hub Mirror Check
         run: |
@@ -116,7 +116,7 @@ jobs:
 
   verify-npm-cache:
     name: Verify NPM Cache (Verdaccio)
-    runs-on: arc-runner-set-arm64
+    runs-on: arc-runner-set-stateless-arm
     steps:
       - name: Verdaccio Functional Test
         run: |
@@ -145,7 +145,7 @@ jobs:
 
   verify-squid-cache:
     name: Verify Squid HTTPS Proxy (Extension Cache)
-    runs-on: arc-runner-set-arm64
+    runs-on: arc-runner-set-stateless-arm
     steps:
       - name: Checkout for CA certificate
         uses: actions/checkout@v4
@@ -201,7 +201,7 @@ jobs:
 
   report-status:
     name: Cache Health Report
-    runs-on: arc-runner-set-arm64
+    runs-on: arc-runner-set-stateless-arm
     needs: [verify-apt-cache, verify-registry-mirrors, verify-npm-cache, verify-squid-cache]
     if: always()
     steps:

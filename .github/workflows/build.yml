@@ -5,17 +5,35 @@ on:
   push:
     branches:
       - main
+  release:
   workflow_dispatch:
 
 jobs:
+  determine-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.set-tag.outputs.release_tag }}
+    steps:
+      - name: Set release tag
+        id: set-tag
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "release_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-push-base:
+    needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
+      tags: ${{ needs.determine-tag.outputs.release_tag }}
     secrets: inherit
   build-and-push-operator:
+    needs: determine-tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,6 +62,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=raw,value=${{ needs.determine-tag.outputs.release_tag }},enable=${{ needs.determine-tag.outputs.release_tag != '' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push (multi-arch)
@@ -58,6 +77,7 @@ jobs:
           secrets: |
             SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
   build-and-push-service:
+    needs: determine-tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,6 +106,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=raw,value=${{ needs.determine-tag.outputs.release_tag }},enable=${{ needs.determine-tag.outputs.release_tag != '' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push (multi-arch)

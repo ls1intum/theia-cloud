@@ -64,10 +64,7 @@ jobs:
         with:
           images: ghcr.io/ls1intum/theia/operator
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=${{ needs.determine-tag.outputs.release_tag }},enable=${{ needs.determine-tag.outputs.release_tag != '' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ needs.determine-tag.outputs.release_tag }}
 
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
@@ -108,10 +105,7 @@ jobs:
         with:
           images: ghcr.io/ls1intum/theia/service
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=${{ needs.determine-tag.outputs.release_tag }},enable=${{ needs.determine-tag.outputs.release_tag != '' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ needs.determine-tag.outputs.release_tag }}
 
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6

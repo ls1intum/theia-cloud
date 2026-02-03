@@ -10,7 +10,7 @@ export function initSentry(config?: TheiaCloudConfig): void {
   }
 
   const sentryDsn = import.meta.env.VITE_SENTRY_DSN ?? defaultDsn;
-  const sentryEnvironment = config?.sentryEnvironment ?? import.meta.env.MODE;
+  const sentryEnvironment = config?.sentryEnvironment;
 
   if (!sentryDsn) {
     return;

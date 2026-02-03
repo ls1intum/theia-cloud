@@ -1,3 +1,5 @@
+name: Build and Push Theia Cloud Images
+
 on:
   pull_request:
     branches:
@@ -7,95 +9,117 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-push-base:
-    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@main
+  determine-tag:
+    runs-on: arc-runner-set-stateless
+    outputs:
+      base_tag: ${{ steps.set-tag.outputs.base_tag }}
+      sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
+      cache_tag: ${{ steps.set-tag.outputs.cache_tag }}
+    steps:
+      - name: Checkout for SHA access
+        uses: actions/checkout@v4
+
+      - name: Set tags
+        id: set-tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_TAG="pr-${{ github.event.pull_request.number }}"
+            CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+            BASE_TAG="latest"
+            CACHE_TAG="build-cache"
+          else
+            # For workflow_dispatch or push on feature branches
+            BASE_TAG="${{ github.ref_name }}"
+            CACHE_TAG="build-cache-${{ github.ref_name }}"
+          fi
+          
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "cache_tag=${CACHE_TAG}" >> "$GITHUB_OUTPUT"
+
+  build-and-push-landing-page:
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
       image-name: ghcr.io/ls1intum/theia/landing-page
       docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
+      runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
+      network: host
+      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
+      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
+      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
+      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets: inherit
+
   build-and-push-operator:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
+    with:
+      docker-file: dockerfiles/operator/Dockerfile
+      image-name: ghcr.io/ls1intum/theia/operator
+      docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
+      runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
+      network: host
+      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
+      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
+      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
+      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/operator:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
+    secrets:
+      docker-secrets: |
+        SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
 
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/ls1intum/theia/operator
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/operator/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          secrets: |
-            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
   build-and-push-service:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/ls1intum/theia/service
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: dockerfiles/service/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          secrets: |
-            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
+    with:
+      docker-file: dockerfiles/service/Dockerfile
+      image-name: ghcr.io/ls1intum/theia/service
+      docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
+      runner-amd64: "arc-runner-set-stateless"
+      runner-arm64: "arc-runner-set-arm64"
+      network: host
+      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
+      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
+      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
+      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      cache-from: |
+        type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/ls1intum/theia/service:build-cache
+      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
+    secrets:
+      docker-secrets: |
+        SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}

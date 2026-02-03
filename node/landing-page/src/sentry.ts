@@ -22,4 +22,5 @@ export function initSentry(config?: TheiaCloudConfig): void {
   });
   Sentry.setTag('component', 'landing-page');
   sentryInitialized = true;
+  console.log('Sentry initialized in environment:', sentryEnvironment);
 }

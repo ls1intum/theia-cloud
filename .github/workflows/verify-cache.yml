@@ -170,7 +170,7 @@ jobs:
           fi
           
           echo "Testing Squid HTTPS proxy ($PROXY_HTTPS)..."
-          if curl -f -s -o /dev/null -x "$PROXY_HTTPS" https://www.google.com; then
+          if curl -f -s -o /dev/null -x "$PROXY_HTTPS" -k https://www.google.com; then
             echo "✅ Squid HTTPS proxy (port 3129) is reachable"
           else
             echo "❌ Squid HTTPS proxy (port 3129) is NOT reachable"
@@ -189,12 +189,14 @@ jobs:
           echo "First download (cache MISS expected)..."
           time curl -f -s -o /dev/null \
             -x "$PROXY" \
+            -k \
             "$EXTENSION_URL"
           
           echo ""
           echo "Second download (cache HIT expected - should be faster)..."
           time curl -f -s -o /dev/null \
             -x "$PROXY" \
+            -k \
             "$EXTENSION_URL"
           
           echo "✅ Squid proxy successfully cached VSIX extension"

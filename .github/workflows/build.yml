@@ -29,7 +29,7 @@ jobs:
         id: set-tag
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-
+          
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
             CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
@@ -45,7 +45,7 @@ jobs:
             BASE_TAG="${{ github.ref_name }}"
             CACHE_TAG="build-cache-${{ github.ref_name }}"
           fi
-
+          
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "cache_tag=${CACHE_TAG}" >> "$GITHUB_OUTPUT"

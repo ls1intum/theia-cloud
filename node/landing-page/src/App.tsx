@@ -24,6 +24,7 @@ import { LoginButton } from './components/LoginButton';
 import { Privacy } from './components/Privacy';
 import { SelectApp } from './components/SelectApp';
 import { VantaBackground } from './components/VantaBackground';
+import { initSentry } from './sentry';
 
 // global state to be kept between render calls
 let initialized = false;
@@ -36,6 +37,12 @@ function App(): JSX.Element {
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState<'home' | 'imprint' | 'privacy'>('home');
+
+  useEffect(() => {
+    if (config) {
+      initSentry(config);
+    }
+  }, [config]);
 
   // Handle URL routing
   useEffect(() => {
@@ -370,6 +377,7 @@ function App(): JSX.Element {
           user: config.useKeycloak ? email! : user!,
           appDefinition: appDefinition,
           workspaceName: workspace,
+          ephemeral: workspace === undefined, // No workspace = ephemeral session
           env: {
             fromMap: {
               THEIA: 'true',

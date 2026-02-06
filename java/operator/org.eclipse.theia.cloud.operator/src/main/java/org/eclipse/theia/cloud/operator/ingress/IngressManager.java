@@ -3,8 +3,9 @@ package org.eclipse.theia.cloud.operator.ingress;
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
@@ -13,25 +14,18 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
-import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
+import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.Service;
-import io.fabric8.kubernetes.api.model.networking.v1.HTTPIngressPath;
-import io.fabric8.kubernetes.api.model.networking.v1.HTTPIngressRuleValue;
-import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
-import io.fabric8.kubernetes.api.model.networking.v1.IngressBackend;
-import io.fabric8.kubernetes.api.model.networking.v1.IngressRule;
-import io.fabric8.kubernetes.api.model.networking.v1.IngressServiceBackend;
-import io.fabric8.kubernetes.api.model.networking.v1.ServiceBackendPort;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 
 /**
- * Centralized manager for ingress operations.
- * Handles adding/removing ingress rules for sessions.
+ * Centralized manager for HTTPRoute operations (Gateway API).
+ * Handles adding/removing route rules for sessions.
  */
 @Singleton
 public class IngressManager {
@@ -48,7 +42,7 @@ public class IngressManager {
     private IngressPathProvider pathProvider;
 
     /**
-     * Specification for an ingress rule to be added.
+     * Specification for a route rule to be added.
      */
     public static class IngressRuleSpec {
         private final String serviceName;
@@ -105,10 +99,10 @@ public class IngressManager {
     }
 
     /**
-     * Gets the ingress for an app definition.
+     * Gets the HTTPRoute for an app definition.
      */
-    public Optional<Ingress> getIngress(AppDefinition appDefinition, String correlationId) {
-        return K8sUtil.getExistingIngress(
+    public Optional<GenericKubernetesResource> getIngress(AppDefinition appDefinition, String correlationId) {
+        return K8sUtil.getExistingHttpRoute(
                 client.kubernetes(),
                 client.namespace(),
                 appDefinition.getMetadata().getName(),
@@ -116,12 +110,12 @@ public class IngressManager {
     }
 
     /**
-     * Adds an ingress rule for a session using eager start (prewarmed instance).
+     * Adds a route rule for a session using eager start (prewarmed instance).
      * 
      * @return the full URL for the session
      */
     public String addRuleForEagerSession(
-            Ingress ingress,
+            GenericKubernetesResource route,
             Service service,
             AppDefinition appDefinition,
             int instance,
@@ -141,7 +135,7 @@ public class IngressManager {
             }
         }
 
-        addRule(ingress, IngressRuleSpec.builder()
+        addRule(route, IngressRuleSpec.builder()
                 .serviceName(service.getMetadata().getName())
                 .port(port)
                 .path(path)
@@ -152,13 +146,13 @@ public class IngressManager {
     }
 
     /**
-     * Adds an ingress rule for a session using lazy start.
+     * Adds a route rule for a session using lazy start.
      * Supports multiple hosts (for hostname prefixes).
      * 
      * @return the full URL for the session
      */
     public String addRuleForLazySession(
-            Ingress ingress,
+            GenericKubernetesResource route,
             Service service,
             Session session,
             AppDefinition appDefinition,
@@ -179,7 +173,7 @@ public class IngressManager {
             }
         }
 
-        addRule(ingress, IngressRuleSpec.builder()
+        addRule(route, IngressRuleSpec.builder()
                 .serviceName(service.getMetadata().getName())
                 .port(port)
                 .path(path)
@@ -190,43 +184,50 @@ public class IngressManager {
     }
 
     /**
-     * Adds ingress rules according to the specification.
+     * Adds HTTPRoute rules according to the specification.
      */
-    public void addRule(Ingress ingress, IngressRuleSpec spec, String correlationId) {
+    public synchronized void addRule(GenericKubernetesResource route, IngressRuleSpec spec, String correlationId) {
         try {
-            client.ingresses().edit(correlationId, ingress.getMetadata().getName(), ingressToUpdate -> {
+            client.httpRoutes().edit(correlationId, route.getMetadata().getName(), routeToUpdate -> {
+                Map<String, Object> specMap = getSpec(routeToUpdate);
+
+                List<String> hostnames = getStringList(specMap, "hostnames");
                 for (String host : spec.hosts) {
-                    IngressRule rule = createIngressRule(host, spec.serviceName, spec.port, spec.path);
-                    ingressToUpdate.getSpec().getRules().add(rule);
+                    if (!hostnames.contains(host)) {
+                        hostnames.add(host);
+                    }
                 }
+
+                List<Map<String, Object>> rules = getRuleList(specMap);
+                rules.add(createRouteRule(spec.serviceName, spec.port, spec.path));
             });
             LOGGER.info(formatLogMessage(correlationId,
-                    "Added ingress rule for path " + spec.path + " to " + ingress.getMetadata().getName()));
+                    "Added HTTPRoute rule for path " + spec.path + " to " + route.getMetadata().getName()));
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to add ingress rule to " + ingress.getMetadata().getName()), e);
+                    "Failed to add HTTPRoute rule to " + route.getMetadata().getName()), e);
             throw e;
         }
     }
 
     /**
-     * Removes an ingress rule for an eager session.
+     * Removes a route rule for an eager session.
      */
     public void removeRuleForEagerSession(
-            Ingress ingress,
+            GenericKubernetesResource route,
             AppDefinition appDefinition,
             int instance,
             String correlationId) {
 
         String path = pathProvider.getPath(appDefinition, instance);
-        removeRuleByPath(ingress, path, correlationId);
+        removeRuleByPath(route, path, correlationId);
     }
 
     /**
-     * Removes ingress rules for a lazy session (handles multiple hosts).
+     * Removes route rules for a lazy session (handles multiple hosts).
      */
     public boolean removeRulesForLazySession(
-            Ingress ingress,
+            GenericKubernetesResource route,
             Session session,
             AppDefinition appDefinition,
             String correlationId) {
@@ -244,97 +245,147 @@ public class IngressManager {
             }
         }
 
-        return removeRulesByPathAndHosts(ingress, path, hosts, correlationId);
+        return removeRulesByPathAndHosts(route, path, hosts, correlationId);
     }
 
     /**
-     * Removes ingress rule by path (matches any host).
+     * Removes HTTPRoute rule by path.
      */
-    public void removeRuleByPath(Ingress ingress, String path, String correlationId) {
-        String fullPath = path + AddedHandlerUtil.INGRESS_REWRITE_PATH;
-
+    public synchronized void removeRuleByPath(GenericKubernetesResource route, String path, String correlationId) {
         try {
-            client.ingresses().resource(ingress.getMetadata().getName()).edit(ingressToUpdate -> {
-                ingressToUpdate.getSpec().getRules().removeIf(rule -> {
-                    if (rule.getHttp() == null) {
-                        return false;
-                    }
-                    return rule.getHttp().getPaths().stream()
-                            .anyMatch(httpPath -> fullPath.equals(httpPath.getPath()));
-                });
-                return ingressToUpdate;
+            client.httpRoutes().resource(route.getMetadata().getName()).edit(routeToUpdate -> {
+                Map<String, Object> specMap = getSpec(routeToUpdate);
+                List<Map<String, Object>> rules = getRuleList(specMap);
+                rules.removeIf(rule -> hasPathMatch(rule, path));
+                return routeToUpdate;
             });
             LOGGER.info(formatLogMessage(correlationId,
-                    "Removed ingress rule for path " + path + " from " + ingress.getMetadata().getName()));
+                    "Removed HTTPRoute rule for path " + path + " from " + route.getMetadata().getName()));
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to remove ingress rule from " + ingress.getMetadata().getName()), e);
+                    "Failed to remove HTTPRoute rule from " + route.getMetadata().getName()), e);
             throw e;
         }
     }
 
     /**
-     * Removes ingress rules matching path and specific hosts.
+     * Removes HTTPRoute rules matching path and specific hosts.
      */
-    public boolean removeRulesByPathAndHosts(
-            Ingress ingress,
+    public synchronized boolean removeRulesByPathAndHosts(
+            GenericKubernetesResource route,
             String path,
             List<String> hosts,
             String correlationId) {
 
-        String fullPath = path + AddedHandlerUtil.INGRESS_REWRITE_PATH;
-
         try {
-            client.ingresses().resource(ingress.getMetadata().getName()).edit(ingressToUpdate -> {
-                ingressToUpdate.getSpec().getRules().removeIf(rule -> {
-                    if (rule.getHttp() == null || rule.getHost() == null) {
-                        return false;
-                    }
-                    if (!hosts.contains(rule.getHost())) {
-                        return false;
-                    }
-                    return rule.getHttp().getPaths().stream()
-                            .anyMatch(httpPath -> fullPath.equals(httpPath.getPath()));
-                });
-                return ingressToUpdate;
+            client.httpRoutes().resource(route.getMetadata().getName()).edit(routeToUpdate -> {
+                Map<String, Object> specMap = getSpec(routeToUpdate);
+                List<Map<String, Object>> rules = getRuleList(specMap);
+                rules.removeIf(rule -> hasPathMatch(rule, path));
+                return routeToUpdate;
             });
             LOGGER.info(formatLogMessage(correlationId,
-                    "Removed ingress rules for path " + path + " from " + ingress.getMetadata().getName()));
+                    "Removed HTTPRoute rules for path " + path + " from " + route.getMetadata().getName()));
             return true;
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to remove ingress rules from " + ingress.getMetadata().getName()), e);
+                    "Failed to remove HTTPRoute rules from " + route.getMetadata().getName()), e);
             throw e;
         }
     }
 
-    /**
-     * Creates an IngressRule object.
-     */
-    private IngressRule createIngressRule(String host, String serviceName, int port, String path) {
-        IngressRule rule = new IngressRule();
-        rule.setHost(host);
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> getSpec(GenericKubernetesResource route) {
+        Map<String, Object> additional = route.getAdditionalProperties();
+        if (additional == null) {
+            additional = new HashMap<>();
+            route.setAdditionalProperties(additional);
+        }
+        return (Map<String, Object>) additional.computeIfAbsent("spec", key -> new HashMap<>());
+    }
 
-        HTTPIngressRuleValue http = new HTTPIngressRuleValue();
-        rule.setHttp(http);
+    @SuppressWarnings("unchecked")
+    private List<String> getStringList(Map<String, Object> spec, String key) {
+        Object existing = spec.get(key);
+        if (existing instanceof List) {
+            return (List<String>) existing;
+        }
+        List<String> list = new ArrayList<>();
+        spec.put(key, list);
+        return list;
+    }
 
-        HTTPIngressPath httpPath = new HTTPIngressPath();
-        http.setPaths(Collections.singletonList(httpPath));
-        httpPath.setPath(path + AddedHandlerUtil.INGRESS_REWRITE_PATH);
-        httpPath.setPathType(AddedHandlerUtil.INGRESS_PATH_TYPE);
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> getRuleList(Map<String, Object> spec) {
+        Object existing = spec.get("rules");
+        if (existing instanceof List) {
+            return (List<Map<String, Object>>) existing;
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        spec.put("rules", list);
+        return list;
+    }
 
-        IngressBackend backend = new IngressBackend();
-        httpPath.setBackend(backend);
+    private Map<String, Object> createRouteRule(String serviceName, int port, String path) {
+        Map<String, Object> rule = new HashMap<>();
 
-        IngressServiceBackend serviceBackend = new IngressServiceBackend();
-        backend.setService(serviceBackend);
-        serviceBackend.setName(serviceName);
+        Map<String, Object> match = new HashMap<>();
+        Map<String, Object> matchPath = new HashMap<>();
+        matchPath.put("type", "PathPrefix");
+        matchPath.put("value", path);
+        match.put("path", matchPath);
 
-        ServiceBackendPort servicePort = new ServiceBackendPort();
-        serviceBackend.setPort(servicePort);
-        servicePort.setNumber(port);
+        List<Map<String, Object>> matches = new ArrayList<>();
+        matches.add(match);
+        rule.put("matches", matches);
+
+        Map<String, Object> rewritePath = new HashMap<>();
+        rewritePath.put("type", "ReplacePrefixMatch");
+        rewritePath.put("replacePrefixMatch", "/");
+
+        Map<String, Object> urlRewrite = new HashMap<>();
+        urlRewrite.put("path", rewritePath);
+
+        Map<String, Object> filter = new HashMap<>();
+        filter.put("type", "URLRewrite");
+        filter.put("urlRewrite", urlRewrite);
+
+        List<Map<String, Object>> filters = new ArrayList<>();
+        filters.add(filter);
+        rule.put("filters", filters);
+
+        Map<String, Object> backendRef = new HashMap<>();
+        backendRef.put("name", serviceName);
+        backendRef.put("port", port);
+
+        List<Map<String, Object>> backendRefs = new ArrayList<>();
+        backendRefs.add(backendRef);
+        rule.put("backendRefs", backendRefs);
 
         return rule;
     }
-}
 
+    @SuppressWarnings("unchecked")
+    private boolean hasPathMatch(Map<String, Object> rule, String path) {
+        Object matchesObj = rule.get("matches");
+        if (!(matchesObj instanceof List)) {
+            return false;
+        }
+        for (Object matchObj : (List<Object>) matchesObj) {
+            if (!(matchObj instanceof Map)) {
+                continue;
+            }
+            Map<String, Object> match = (Map<String, Object>) matchObj;
+            Object pathObj = match.get("path");
+            if (!(pathObj instanceof Map)) {
+                continue;
+            }
+            Map<String, Object> pathMap = (Map<String, Object>) pathObj;
+            Object value = pathMap.get("value");
+            if (path.equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

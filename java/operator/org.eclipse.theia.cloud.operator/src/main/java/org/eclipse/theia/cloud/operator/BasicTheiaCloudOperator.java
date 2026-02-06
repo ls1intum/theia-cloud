@@ -20,13 +20,18 @@ import static org.eclipse.theia.cloud.common.util.LogMessageUtil.generateCorrela
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
@@ -35,11 +40,15 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
+import org.eclipse.theia.cloud.common.tracing.TraceContext;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.handler.appdef.AppDefinitionHandler;
 import org.eclipse.theia.cloud.operator.handler.session.SessionHandler;
 import org.eclipse.theia.cloud.operator.handler.ws.WorkspaceHandler;
 import org.eclipse.theia.cloud.operator.plugins.OperatorPlugin;
 import org.eclipse.theia.cloud.operator.util.SpecWatch;
+
+import io.sentry.ISpan;
 
 import com.google.inject.Inject;
 
@@ -49,6 +58,8 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
     private static final ScheduledExecutorService STOP_EXECUTOR = Executors.newSingleThreadScheduledExecutor();
     private static final ScheduledExecutorService WATCH_EXECUTOR = Executors.newSingleThreadScheduledExecutor();
+    private static final int SESSION_EVENT_QUEUE_SIZE = 1000;
+    private static final long SESSION_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 30L;
 
     private static final Logger LOGGER = LogManager.getLogger(BasicTheiaCloudOperator.class);
 
@@ -80,15 +91,36 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     private final Map<String, Session> sessionCache = new ConcurrentHashMap<>();
     private final Set<SpecWatch<?>> watches = new LinkedHashSet<>();
 
+    // Session event scheduling: per-session serialization, cross-session parallelism.
+    private ExecutorService sessionExecutor;
+    private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
+
     @Override
     public void start() {
         this.operatorPlugins.forEach(plugin -> plugin.start());
+        initSessionExecutor();
         watches.add(initAppDefinitionsAndWatchForChanges());
         watches.add(initWorkspacesAndWatchForChanges());
         watches.add(initSessionsAndWatchForChanges());
 
         STOP_EXECUTOR.scheduleWithFixedDelay(this::stopTimedOutSessions, 1, 1, TimeUnit.MINUTES);
         WATCH_EXECUTOR.scheduleWithFixedDelay(this::lookForIdleWatches, 1, 1, TimeUnit.MINUTES);
+    }
+
+    @Override
+    public void stop() {
+        if (sessionExecutor == null) {
+            return;
+        }
+        sessionExecutor.shutdown();
+        try {
+            if (!sessionExecutor.awaitTermination(SESSION_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                sessionExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            sessionExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     protected SpecWatch<AppDefinition> initAppDefinitionsAndWatchForChanges() {
@@ -124,7 +156,7 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     protected SpecWatch<Session> initSessionsAndWatchForChanges() {
         try {
             resourceClient.sessions().list().forEach(this::initSession);
-            SpecWatch<Session> watcher = new SpecWatch<>(sessionCache, this::handleSessionEvent, "Session",
+            SpecWatch<Session> watcher = new SpecWatch<>(sessionCache, this::scheduleSessionEvent, "Session",
                     COR_ID_SESSIONPREFIX);
             resourceClient.sessions().operation().watch(watcher);
             return watcher;
@@ -152,7 +184,24 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     protected void initSession(Session resource) {
         sessionCache.put(resource.getMetadata().getUid(), resource);
         String uid = resource.getMetadata().getUid();
-        handleSessionEvent(Watcher.Action.ADDED, uid, TheiaCloudOperatorLauncher.COR_ID_INIT);
+        scheduleSessionEvent(Watcher.Action.ADDED, uid, TheiaCloudOperatorLauncher.COR_ID_INIT);
+    }
+
+    protected void scheduleSessionEvent(Watcher.Action action, String uid, String correlationId) {
+        Session session = sessionCache.get(uid);
+        SessionState state = sessionStates.computeIfAbsent(uid, k -> new SessionState());
+        boolean shouldSchedule = false;
+        synchronized (state.lock) {
+            state.queue.add(new SessionEvent(action, correlationId, session));
+            // Ensure only one runner per session UID.
+            if (!state.running) {
+                state.running = true;
+                shouldSchedule = true;
+            }
+        }
+        if (shouldSchedule) {
+            sessionExecutor.execute(() -> drainSessionEvents(uid, state));
+        }
     }
 
     protected void handleAppDefnitionEvent(Watcher.Action action, String uid, String correlationId) {
@@ -181,30 +230,156 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     }
 
     protected void handleSessionEvent(Watcher.Action action, String uid, String correlationId) {
+        Session session = sessionCache.get(uid);
+        if (session == null) {
+            return;
+        }
+
+        // Extract trace context from Session annotations (if propagated from service)
+        Optional<TraceContext> traceContext = TraceContext.fromMetadata(session.getMetadata());
+        
+        ISpan span = null;
         try {
-            Session session = sessionCache.get(uid);
+            String name = "session." + action.name().toLowerCase();
+            String operation = action.name() + " session " + session.getSpec().getName();
+            span = Tracing.continueTraceAsync(traceContext, name, operation);
+            span.setTag("session.name", session.getSpec().getName());
+            span.setTag("app_definition", session.getSpec().getAppDefinition());
+            span.setTag("user", session.getSpec().getUser());
+            
+            span.setTag("action", action.name());
+            span.setData("correlation_id", correlationId);
+
             switch (action) {
             case ADDED:
-                sessionHandler.sessionAdded(session, correlationId);
+                sessionHandler.sessionAdded(session, correlationId, span);
                 break;
             case DELETED:
-                sessionHandler.sessionDeleted(session, correlationId);
+                sessionHandler.sessionDeleted(session, correlationId, span);
                 break;
             case MODIFIED:
-                sessionHandler.sessionModified(session, correlationId);
+                sessionHandler.sessionModified(session, correlationId, span);
                 break;
             case ERROR:
-                sessionHandler.sessionErrored(session, correlationId);
+                sessionHandler.sessionErrored(session, correlationId, span);
                 break;
             case BOOKMARK:
-                sessionHandler.sessionBookmarked(session, correlationId);
+                sessionHandler.sessionBookmarked(session, correlationId, span);
                 break;
             }
+            
+            Tracing.finishSuccess(span);
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling sessions"), e);
+            if (span != null) {
+                Tracing.finishError(span, e);
+            }
             if (!arguments.isContinueOnException()) {
                 System.exit(-1);
             }
+        }
+    }
+
+    private void handleSessionEvent(SessionEvent event) {
+        if (event.session == null) {
+            return;
+        }
+        // Extract trace context from Session annotations (if propagated from service)
+        Optional<TraceContext> traceContext = TraceContext.fromMetadata(event.session.getMetadata());
+
+        ISpan span = null;
+        try {
+            String name = "session." + event.action.name().toLowerCase();
+            String operation = event.action.name() + " session " + event.session.getSpec().getName();
+            span = Tracing.continueTraceAsync(traceContext, name, operation);
+            span.setTag("session.name", event.session.getSpec().getName());
+            span.setTag("app_definition", event.session.getSpec().getAppDefinition());
+            span.setTag("user", event.session.getSpec().getUser());
+
+            span.setTag("action", event.action.name());
+            span.setData("correlation_id", event.correlationId);
+
+            switch (event.action) {
+            case ADDED:
+                sessionHandler.sessionAdded(event.session, event.correlationId, span);
+                break;
+            case DELETED:
+                sessionHandler.sessionDeleted(event.session, event.correlationId, span);
+                break;
+            case MODIFIED:
+                sessionHandler.sessionModified(event.session, event.correlationId, span);
+                break;
+            case ERROR:
+                sessionHandler.sessionErrored(event.session, event.correlationId, span);
+                break;
+            case BOOKMARK:
+                sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
+                break;
+            }
+            Tracing.finishSuccess(span);
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(event.correlationId, "Error while handling sessions"), e);
+            if (span != null) {
+                Tracing.finishError(span, e);
+            }
+            if (!arguments.isContinueOnException()) {
+                System.exit(-1);
+            }
+        }
+    }
+
+    private void initSessionExecutor() {
+        int threads = arguments.getSessionHandlerThreads();
+        sessionExecutor = new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(SESSION_EVENT_QUEUE_SIZE), new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    private void drainSessionEvents(String uid, SessionState state) {
+        while (true) {
+            SessionEvent event;
+            synchronized (state.lock) {
+                event = state.queue.poll();
+                if (event == null) {
+                    state.running = false;
+                    break;
+                }
+            }
+            handleSessionEvent(event);
+        }
+        tryCleanupSessionState(uid, state);
+    }
+
+    private void tryCleanupSessionState(String uid, SessionState state) {
+        SessionState currentState = sessionStates.get(uid);
+        if (currentState == null) {
+            return;
+        }
+        synchronized (currentState.lock) {
+            if (currentState != state) {
+                return;
+            }
+            if (!currentState.queue.isEmpty() || currentState.running) {
+                return;
+            }
+            sessionStates.remove(uid, currentState);
+        }
+    }
+
+    private static final class SessionState {
+        private final Deque<SessionEvent> queue = new ArrayDeque<>();
+        private final Object lock = new Object();
+        private boolean running;
+    }
+
+    private static final class SessionEvent {
+        private final Watcher.Action action;
+        private final String correlationId;
+        private final Session session;
+
+        private SessionEvent(Watcher.Action action, String correlationId, Session session) {
+            this.action = action;
+            this.correlationId = correlationId;
+            this.session = session;
         }
     }
 

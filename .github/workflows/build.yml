@@ -7,6 +7,10 @@ on:
   push:
     branches:
       - main
+  release:
+    types:
+      - published
+      - prereleased
   workflow_dispatch:
 
 concurrency:
@@ -32,6 +36,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
             CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            # For release events, use the release tag/version
+            BASE_TAG="${{ github.event.release.tag_name }}"
+            CACHE_TAG="build-cache-release"
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             BASE_TAG="latest"
             CACHE_TAG="build-cache"

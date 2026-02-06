@@ -7,6 +7,10 @@ on:
   push:
     branches:
       - main
+  release:
+    types:
+      - published
+      - prereleased
   workflow_dispatch:
 
 concurrency:
@@ -32,6 +36,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
             CACHE_TAG="build-cache-pr-${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            # For release events, use the release tag/version
+            BASE_TAG="${{ github.event.release.tag_name }}"
+            CACHE_TAG="build-cache-release"
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
             BASE_TAG="latest"
             CACHE_TAG="build-cache"
@@ -55,6 +63,8 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host
@@ -78,6 +88,8 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host
@@ -103,6 +115,8 @@ jobs:
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
+      build-amd64: true
+      build-arm64: ${{ github.event_name != 'pull_request' }}
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host

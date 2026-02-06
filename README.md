@@ -42,7 +42,7 @@ From version 0.9.0 onwards, every component in this repository (and the helm cha
 
 ### Release Types
 
-- **Releases:** Standard releases wi ll occur every three months. We recommend to use these for deployments as those are thoroughly tested and are stable versions. You can then update, after three months, when the next version is available.
+- **Releases:** Standard releases will occur every three months. We recommend to use these for deployments as those are thoroughly tested and are stable versions. You can then update, after three months, when the next version is available.
 - **Pre-Releases:** Pre-release versions will be released on every commit. These versions will be tagged as `<current-version>-next.<git-sha>`. The latest version of a next version is available at `<current-version>-next`. Pre-releases are ideal for testing the latest features and changes or for making contributions. However we do not recommend, to use those versions in deployments.
 
 The [helm charts](https://github.com/eclipse-theia/theia-cloud-helm) are referencing the compatible version in their `appVersion` field.

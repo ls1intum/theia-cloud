@@ -64,7 +64,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
-      build-arm64: ${{ github.event_name != 'pull_request' }}
+      build-arm64: true
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host
@@ -89,7 +89,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
-      build-arm64: ${{ github.event_name != 'pull_request' }}
+      build-arm64: true
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host
@@ -116,7 +116,7 @@ jobs:
         ${{ needs.determine-tag.outputs.base_tag }}
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
-      build-arm64: ${{ github.event_name != 'pull_request' }}
+      build-arm64: true
       runner-amd64: "arc-runner-set-stateless"
       runner-arm64: "arc-runner-set-arm64"
       network: host

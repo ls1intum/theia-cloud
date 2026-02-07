@@ -181,8 +181,8 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         } else {
             environmentVariables.put(PLACEHOLDER_CA_BUNDLE_PEM_PATH, "");
             environmentVariables.put(PLACEHOLDER_GRADLE_TRUST_OPTS, "");
-            environmentVariables.put(PLACEHOLDER_TRUST_BUNDLE_MOUNT_PATH, "");
-            environmentVariables.put(PLACEHOLDER_TRUST_BUNDLE_CONFIGMAP, "");
+            environmentVariables.put(PLACEHOLDER_TRUST_BUNDLE_MOUNT_PATH, "/tmp/trust-bundle-unused");
+            environmentVariables.put(PLACEHOLDER_TRUST_BUNDLE_CONFIGMAP, "trust-bundle-unused");
         }
 
         if (arguments.isEnableMonitor()) {

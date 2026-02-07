@@ -97,6 +97,14 @@ spec:
             value: placeholder-data-bridge-strategy
           - name: THEIA
             value: 1
+          - name: NODE_EXTRA_CA_CERTS
+            value: placeholder-ca-bundle-pem-path
+          - name: GRADLE_OPTS
+            value: placeholder-gradle-trust-opts
+          volumeMounts:
+            - name: trust-bundle
+              mountPath: placeholder-trust-bundle-mount-path
+              readOnly: true
           securityContext:
             runAsUser: placeholder-uid
             runAsGroup: placeholder-uid
@@ -112,3 +120,7 @@ spec:
         - name: oauth2-emails
           configMap:
             name: placeholder-emailsconfigname
+        - name: trust-bundle
+          configMap:
+            name: placeholder-trust-bundle-configmap
+            optional: true

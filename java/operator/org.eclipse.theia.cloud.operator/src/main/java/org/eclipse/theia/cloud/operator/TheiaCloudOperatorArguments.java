@@ -275,6 +275,23 @@ public class TheiaCloudOperatorArguments {
         return null;
     }
 
+    /**
+     * Validates that required argument combinations are satisfied.
+     * Must be called after argument parsing.
+     *
+     * @throws IllegalArgumentException if a caching flag is enabled but its URL is missing
+     */
+    public void validate() {
+        if (enableBuildCaching && (buildCacheUrl == null || buildCacheUrl.trim().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "--buildCacheUrl is required when --enableBuildCaching is set");
+        }
+        if (enableDependencyCaching && (dependencyCacheUrl == null || dependencyCacheUrl.trim().isEmpty())) {
+            throw new IllegalArgumentException(
+                    "--dependencyCacheUrl is required when --enableDependencyCaching is set");
+        }
+    }
+
     public boolean isEnableBuildCaching() {
         return enableBuildCaching;
     }

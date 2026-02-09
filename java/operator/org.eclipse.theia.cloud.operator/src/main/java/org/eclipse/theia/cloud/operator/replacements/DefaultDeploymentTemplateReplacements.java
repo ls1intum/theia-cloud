@@ -185,7 +185,7 @@ public class DefaultDeploymentTemplateReplacements implements DeploymentTemplate
         }
 
         if (arguments.isEnableBuildCaching() && arguments.getBuildCacheUrl() != null
-                && arguments.getBuildCacheUrl().startsWith("https")) {
+                && arguments.getBuildCacheUrl().trim().startsWith("https")) {
             // Only set trust config when using HTTPS for the cache
             environmentVariables.put(PLACEHOLDER_CA_BUNDLE_PEM_PATH, "/etc/ssl/theia-trust/trust-bundle.pem");
             environmentVariables.put(PLACEHOLDER_GRADLE_TRUST_OPTS,

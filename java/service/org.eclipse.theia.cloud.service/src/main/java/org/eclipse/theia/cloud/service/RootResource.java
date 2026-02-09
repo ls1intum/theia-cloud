@@ -66,9 +66,10 @@ public class RootResource extends BaseResource {
         final String correlationId = evaluatedRequest.getCorrelationId();
         final String user = evaluatedRequest.getUser();
 
-        // Create dynamic tags for metrics
-        Tag appDefinitionTag = new Tag("app_definition", request.appDefinition);
-        Tag namespaceTag = new Tag("namespace", k8sUtil.getNamespace());
+        String sanitizedAppDef = sanitizeMetricTagValue(request.appDefinition);
+        String sanitizedNamespace = sanitizeMetricTagValue(k8sUtil.getNamespace());
+        Tag appDefinitionTag = new Tag("app_definition", sanitizedAppDef);
+        Tag namespaceTag = new Tag("namespace", sanitizedNamespace);
 
         // Get or create timer with dynamic tags
         Timer timer = metricRegistry.timer(
@@ -135,5 +136,16 @@ public class RootResource extends BaseResource {
             // Stop timing and record the measurement
             timerContext.stop();
         }
+    }
+
+    private String sanitizeMetricTagValue(String value) {
+        if (value == null || value.isEmpty()) {
+            return "unknown";
+        }
+        String sanitized = value.replaceAll("[^a-zA-Z0-9_]", "_");
+        if (!sanitized.isEmpty() && Character.isDigit(sanitized.charAt(0))) {
+            sanitized = "_" + sanitized;
+        }
+        return sanitized.isEmpty() ? "unknown" : sanitized;
     }
 }

@@ -17,10 +17,6 @@ export namespace TheiaCloudConfig {
     if ('serviceAuthToken' in config && config.serviceAuthToken) {
       return config.serviceAuthToken;
     }
-    if ('appId' in config && config.appId) {
-      console.warn("Using deprecated property 'appId'. Please migrate to 'serviceAuthToken' in your configuration.");
-      return config.appId;
-    }
     throw new Error('Neither serviceAuthToken nor appId found in configuration');
   }
 }
@@ -44,10 +40,8 @@ interface BaseTheiaCloudConfig {
   useEphemeralStorage: boolean;
 }
 export interface AppDefinition {
-  /** @deprecated Use ServiceConfig#serviceAuthToken instead */
-  appId: string;
+  serviceAuthToken: string
   appName: string;
-  logo: string | undefined;
 }
 
 export interface ServiceConfig {
@@ -91,7 +85,7 @@ export interface LandingPageConfig {
 
 export type TheiaCloudConfig = (
   | (AppDefinition & Partial<ServiceConfig>)
-  | (Pick<AppDefinition, 'appName'> & ServiceConfig)
+  | (AppDefinition & ServiceConfig)
 ) &
   BaseTheiaCloudConfig &
   Partial<KeycloakConfig> &

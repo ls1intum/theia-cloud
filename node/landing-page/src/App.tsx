@@ -121,10 +121,10 @@ function App(): JSX.Element {
         if (config.additionalApps && config.additionalApps.length > 0) {
           // Find the selected app definition in the additional apps
           const appDefinition = config.additionalApps.find(
-            (appDef: AppDefinition) => appDef.appId === pathBlueprintSelection
+            appDef => appDef.serviceAuthToken === pathBlueprintSelection
           );
           setSelectedAppName(appDefinition ? appDefinition.appName : pathBlueprintSelection);
-          setSelectedAppDefinition(appDefinition ? appDefinition.appId : pathBlueprintSelection);
+          setSelectedAppDefinition(appDefinition ? appDefinition.serviceAuthToken : pathBlueprintSelection);
         } else {
           // If there are no additional apps, just use the application id as the name
           console.log('App definitition provided via URL parameter not found in additional apps');
@@ -499,7 +499,7 @@ function isDefaultSelectionValueValid(
     return true;
   }
   if (additionalApps && additionalApps.length > 0) {
-    return additionalApps.map(def => def.appId).filter(appId => appId === defaultSelection).length > 0;
+    return additionalApps.map(def => def.serviceAuthToken).filter(serviceAuthToken => serviceAuthToken === defaultSelection).length > 0;
   }
   // If there are no additional apps explicitly configured, we accept any app definition given via url parameter
   return true;

@@ -83,12 +83,16 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
-          - name: REMOTE_CACHE_ENABLED
-            value: placeholder-cache-enabled
-          - name: REMOTE_CACHE_URL
-            value: placeholder-cache-url
-          - name: REMOTE_CACHE_PUSH
-            value: placeholder-cache-push
+          - name: BUILD_CACHE_ENABLED
+            value: placeholder-build-cache-enabled
+          - name: BUILD_CACHE_URL
+            value: placeholder-build-cache-url
+          - name: BUILD_CACHE_PUSH
+            value: placeholder-build-cache-push
+          - name: DEPENDENCY_CACHE_ENABLED
+            value: placeholder-dependency-cache-enabled
+          - name: DEPENDENCY_CACHE_URL
+            value: placeholder-dependency-cache-url
           - name: DATA_BRIDGE_PORT
             value: placeholder-data-bridge-env-port
           - name: DATA_BRIDGE_ENABLED

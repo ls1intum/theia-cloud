@@ -35,11 +35,15 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
+import org.eclipse.theia.cloud.common.tracing.TraceContext;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.handler.appdef.AppDefinitionHandler;
 import org.eclipse.theia.cloud.operator.handler.session.SessionHandler;
 import org.eclipse.theia.cloud.operator.handler.ws.WorkspaceHandler;
 import org.eclipse.theia.cloud.operator.plugins.OperatorPlugin;
 import org.eclipse.theia.cloud.operator.util.SpecWatch;
+
+import io.sentry.ISpan;
 
 import com.google.inject.Inject;
 
@@ -181,27 +185,56 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     }
 
     protected void handleSessionEvent(Watcher.Action action, String uid, String correlationId) {
+        Session session = sessionCache.get(uid);
+        if (session == null) {
+            return;
+        }
+
+        // Extract trace context from Session annotations (if propagated from service)
+        Optional<TraceContext> traceContext = TraceContext.fromMetadata(session.getMetadata());
+        
+        ISpan span = null;
         try {
-            Session session = sessionCache.get(uid);
+            // Start transaction: continue trace if context exists, otherwise start new
+            if (traceContext.isPresent()) {
+                String name = "session." + action.name().toLowerCase();
+                String operation = action.name() + " session " + session.getSpec().getName();
+                span = Tracing.continueTrace(traceContext.get(), name, operation);
+            } else {
+                // No trace context - start new transaction (backward compatibility)
+                span = Tracing.startTransaction("session." + action.name().toLowerCase(), "session");
+                span.setTag("session.name", session.getSpec().getName());
+                span.setTag("app_definition", session.getSpec().getAppDefinition());
+                span.setTag("user", session.getSpec().getUser());
+            }
+            
+            span.setTag("action", action.name());
+            span.setData("correlation_id", correlationId);
+
             switch (action) {
             case ADDED:
-                sessionHandler.sessionAdded(session, correlationId);
+                sessionHandler.sessionAdded(session, correlationId, span);
                 break;
             case DELETED:
-                sessionHandler.sessionDeleted(session, correlationId);
+                sessionHandler.sessionDeleted(session, correlationId, span);
                 break;
             case MODIFIED:
-                sessionHandler.sessionModified(session, correlationId);
+                sessionHandler.sessionModified(session, correlationId, span);
                 break;
             case ERROR:
-                sessionHandler.sessionErrored(session, correlationId);
+                sessionHandler.sessionErrored(session, correlationId, span);
                 break;
             case BOOKMARK:
-                sessionHandler.sessionBookmarked(session, correlationId);
+                sessionHandler.sessionBookmarked(session, correlationId, span);
                 break;
             }
+            
+            Tracing.finishSuccess(span);
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling sessions"), e);
+            if (span != null) {
+                Tracing.finishError(span, e);
+            }
             if (!arguments.isContinueOnException()) {
                 System.exit(-1);
             }

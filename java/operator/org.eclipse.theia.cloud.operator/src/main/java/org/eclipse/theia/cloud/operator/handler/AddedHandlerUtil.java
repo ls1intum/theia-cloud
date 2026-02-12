@@ -64,9 +64,8 @@ import io.fabric8.kubernetes.api.model.SecretEnvSource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.sentry.ISpan;
-import io.sentry.ITransaction;
-import io.sentry.Sentry;
 import io.sentry.SpanStatus;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 public final class AddedHandlerUtil {
 
@@ -135,42 +134,51 @@ public final class AddedHandlerUtil {
     }
 
     public static void updateSessionURLAsync(SessionResourceClient sessions, Session session, String namespace,
-            String url, String correlationId) {
+            String url, String correlationId, ISpan parentSpan) {
         String sessionName = session.getSpec().getName();
         String appDef = session.getSpec().getAppDefinition();
 
-        EXECUTOR.execute(() -> {
-            // Start a new transaction for the async URL availability check
-            ITransaction tx = Sentry.startTransaction("session.url_availability", "session");
-            tx.setTag("session.name", sessionName);
-            tx.setTag("app_definition", appDef);
-            tx.setData("correlation_id", correlationId);
-            tx.setData("url", url);
+        // Extract trace context BEFORE scheduling - the parent span will be finished by the time executor runs
+        java.util.Optional<org.eclipse.theia.cloud.common.tracing.TraceContext> traceContext = 
+            org.eclipse.theia.cloud.common.tracing.TraceContext.fromSpan(parentSpan);
 
-            long startTime = System.currentTimeMillis();
+        EXECUTOR.execute(() -> {
+            // Create a new transaction linked to the same trace (parent span is already finished)
+            ISpan span = Tracing.continueTraceAsync(traceContext, "session.url_availability", "URL availability check");
+            span.setTag("session.name", sessionName);
+            span.setTag("app_definition", appDef);
+            span.setData("correlation_id", correlationId);
+            span.setData("url", url);
+
             boolean updateURL = false;
             int lastResponseCode = -1;
             String failureReason = null;
 
             try {
-                for (int i = 1; i <= 100; i++) {
+                for (int i = 1; i <= 309; i++) {
+                    /*
+                     * On the first 60 loops we will check every 500ms whether URL is available. This will take at
+                     * least 30s. On the next 60 loops we will check every 1000ms. This will take at least 60s. On
+                     * the next 24 loops we will check every 2500ms. This will take at least further 60s. On the
+                     * next 60 loops we will check every 5000ms. This will take at least further 5 minutes. If the
+                     * pod has not started within the first ~7 minutes, we will continue to check every 30 seconds.
+                     * We give up after an hour.
+                     */
+                    long sleepDuration;
+                    if (i <= 60) {
+                        sleepDuration = 500;
+                    } else if (i <= 120) {
+                        sleepDuration = 1000;
+                    } else if (i <= 144) {
+                        sleepDuration = 2500;
+                    } else if (i <= 204) {
+                        sleepDuration = 5000;
+                    } else {
+                        sleepDuration = 30000;
+                    }
+                    
                     try {
-                        /*
-                         * On the first 15 loops we will check every 2.5s whether URL is available. This will take at
-                         * least 37.5s. On the second 15 loops we will check every 5s. This will take at least 75s. On
-                         * the next 15 loops we will check every 10s. This will take at least further 150s. If the pod
-                         * has not started within the first 4-5 minutes, we will continue to check every minute. We
-                         * give up after an hour.
-                         */
-                        if (i <= 15) {
-                            Thread.sleep(2500);
-                        } else if (i <= 30) {
-                            Thread.sleep(5000);
-                        } else if (i <= 45) {
-                            Thread.sleep(10000);
-                        } else {
-                            Thread.sleep(60000);
-                        }
+                        Thread.sleep(sleepDuration);
                     } catch (InterruptedException e) {
                         /* silent */
                     }
@@ -221,27 +229,26 @@ public final class AddedHandlerUtil {
                     if (updateURL) {
                         LOGGER.info(formatLogMessage(correlationId, url + " is available."));
 
-                        ISpan updateSpan = tx.startChild("session.update_status", "Update session URL status");
+                        ISpan updateSpan = Tracing.childSpan(span, "session.update_status", "Update session URL status");
                         try {
                             sessions.updateStatus(correlationId, session, status -> status.setUrl(url));
-                            updateSpan.setStatus(SpanStatus.OK);
+                            Tracing.finishSuccess(updateSpan);
                         } catch (Exception e) {
-                            updateSpan.setThrowable(e);
-                            updateSpan.setStatus(SpanStatus.INTERNAL_ERROR);
-                            Sentry.captureException(e);
-                        } finally {
-                            updateSpan.finish();
+                            Tracing.finishError(updateSpan, e);
+                            // Propagate failure to outer span
+                            span.setTag("outcome", "error");
+                            span.setData("attempts", i);
+                            span.setData("final_response_code", code);
+                            Tracing.finishError(span, e);
+                            return;
                         }
 
                         LOGGER.info(formatMetric(correlationId, "Running session for " + appDef));
 
-                        long duration = System.currentTimeMillis() - startTime;
-                        tx.setTag("outcome", "success");
-                        tx.setData("attempts", i);
-                        tx.setData("time_to_available_ms", duration);
-                        tx.setData("final_response_code", code);
-                        tx.setStatus(SpanStatus.OK);
-                        tx.finish();
+                        span.setTag("outcome", "success");
+                        span.setData("attempts", i);
+                        span.setData("final_response_code", code);
+                        Tracing.finishSuccess(span);
                         return;
                     } else {
                         LOGGER.trace(formatLogMessage(correlationId, url + " is NOT available yet."));
@@ -249,23 +256,17 @@ public final class AddedHandlerUtil {
                 }
 
                 // Exhausted all attempts
-                long duration = System.currentTimeMillis() - startTime;
-                tx.setTag("outcome", "timeout");
-                tx.setData("attempts", 100);
-                tx.setData("duration_ms", duration);
-                tx.setData("last_response_code", lastResponseCode);
+                span.setTag("outcome", "timeout");
+                span.setData("attempts", 309);
+                span.setData("last_response_code", lastResponseCode);
                 if (failureReason != null) {
-                    tx.setTag("failure.reason", failureReason);
+                    span.setTag("failure.reason", failureReason);
                 }
-                tx.setStatus(SpanStatus.DEADLINE_EXCEEDED);
-                tx.finish();
+                Tracing.finish(span, SpanStatus.DEADLINE_EXCEEDED);
 
             } catch (Exception e) {
-                tx.setTag("outcome", "error");
-                tx.setThrowable(e);
-                tx.setStatus(SpanStatus.INTERNAL_ERROR);
-                Sentry.captureException(e);
-                tx.finish();
+                span.setTag("outcome", "error");
+                Tracing.finishError(span, e);
             }
         });
     }

@@ -80,6 +80,7 @@ export interface LandingPageConfig {
   infoText: string;
   loadingText: string;
   logoFileExtension: string;
+  sentryEnvironment?: string;
   footerLinks?: FooterLinksConfig;
 }
 

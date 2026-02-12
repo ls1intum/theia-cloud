@@ -119,6 +119,37 @@ public class EagerSessionHandler implements SessionHandler {
                 return EagerSessionAddedOutcome.ERROR;
             }
 
+            boolean markedHandling = true;
+            try {
+                SessionStatusUtil.markHandling(client, session, correlationId);
+            } catch (RuntimeException ex) {
+                LOGGER.warn(formatLogMessage(correlationId,
+                        "Unable to mark session as HANDLING. Treating as interrupted/race."), ex);
+                markedHandling = false;
+            }
+            // Check if the session was already handled by another instance
+            if (!markedHandling) {
+                Optional<Session> latestSession = client.sessions().get(session.getMetadata().getName());
+                if (latestSession.isPresent()) {
+                    SessionStatusUtil.PreHandleResult latestPreHandle = SessionStatusUtil.evaluateStatus(
+                            latestSession.get(), client, correlationId, LOGGER);
+                    if (latestPreHandle == SessionStatusUtil.PreHandleResult.ALREADY_HANDLED) {
+                        span.setTag("outcome", "already_handled");
+                        Tracing.finish(span, SpanStatus.OK);
+                        return EagerSessionAddedOutcome.HANDLED;
+                    }
+                    if (latestPreHandle == SessionStatusUtil.PreHandleResult.INTERRUPTED
+                            || latestPreHandle == SessionStatusUtil.PreHandleResult.PREVIOUS_ERROR) {
+                        span.setTag("outcome", "interrupted");
+                        Tracing.finish(span, SpanStatus.ABORTED);
+                        return EagerSessionAddedOutcome.ERROR;
+                    }
+                }
+                span.setTag("outcome", "interrupted");
+                Tracing.finish(span, SpanStatus.ABORTED);
+                return EagerSessionAddedOutcome.ERROR;
+            }
+
             // Find app definition
             ISpan appDefSpan = Tracing.childSpan(span, "eager.find_appdef", "Find app definition");
             Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);

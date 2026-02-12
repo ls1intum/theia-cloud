@@ -41,6 +41,7 @@ import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
 import org.eclipse.theia.cloud.operator.util.K8sResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudK8sUtil;
@@ -87,10 +88,14 @@ public class LazySessionHandler implements SessionHandler {
     @Inject
     protected IngressManager ingressManager;
 
+    @Inject
+    protected LanguageServerManager languageServerManager;
+
     @Override
     public boolean sessionAdded(Session session, String correlationId, ISpan parentSpan) {
+        ISpan span = Tracing.childSpan(parentSpan, "lazy.setup", "Lazy session setup");
         try {
-            return doSessionAdded(session, correlationId, parentSpan);
+            return doSessionAdded(session, correlationId, span);
         } catch (Throwable ex) {
             LOGGER.error(formatLogMessage(correlationId,
                     "An unexpected exception occurred while adding Session: " + session), ex);
@@ -99,6 +104,7 @@ public class LazySessionHandler implements SessionHandler {
                 status.setOperatorMessage(
                         "Unexpected error. Please check the logs for correlationId: " + correlationId);
             });
+            Tracing.finishError(span, ex);
             return false;
         }
     }
@@ -116,11 +122,11 @@ public class LazySessionHandler implements SessionHandler {
         // Check current session status and ignore if handling failed or finished before
         Optional<SessionStatus> status = Optional.ofNullable(session.getStatus());
         String operatorStatus = status.map(ResourceStatus::getOperatorStatus).orElse(OperatorStatus.NEW);
-
         if (OperatorStatus.HANDLED.equals(operatorStatus)) {
             LOGGER.trace(formatLogMessage(correlationId,
                     "Session was successfully handled before and is skipped now. Session: " + session));
             span.setTag("outcome", "already_handled");
+            Tracing.finishSuccess(span);
             return true;
         }
         if (OperatorStatus.HANDLING.equals(operatorStatus)) {
@@ -130,11 +136,13 @@ public class LazySessionHandler implements SessionHandler {
                 s.setOperatorMessage("Handling was unexpectedly interrupted. CorrelationId: " + correlationId);
             });
             span.setTag("outcome", "interrupted");
+            Tracing.finish(span, SpanStatus.ABORTED);
             return false;
         }
         if (OperatorStatus.ERROR.equals(operatorStatus)) {
             LOGGER.warn(formatLogMessage(correlationId, "Session previously errored. Skipping."));
             span.setTag("outcome", "previous_error");
+            Tracing.finish(span, SpanStatus.ABORTED);
             return false;
         }
 
@@ -155,7 +163,7 @@ public class LazySessionHandler implements SessionHandler {
             appDefSpan.setTag("outcome", "not_found");
             Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "appdef_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         AppDefinition appDef = appDefOpt.get();
@@ -172,6 +180,7 @@ public class LazySessionHandler implements SessionHandler {
             limitsSpan.setTag("outcome", "max_instances");
             Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
             span.setTag("outcome", "max_instances_reached");
+            Tracing.finish(span, SpanStatus.RESOURCE_EXHAUSTED);
             return false;
         }
         if (hasMaxSessionsReached(session, correlationId)) {
@@ -179,6 +188,7 @@ public class LazySessionHandler implements SessionHandler {
             limitsSpan.setTag("outcome", "max_sessions");
             Tracing.finish(limitsSpan, SpanStatus.RESOURCE_EXHAUSTED);
             span.setTag("outcome", "max_sessions_reached");
+            Tracing.finish(span, SpanStatus.RESOURCE_EXHAUSTED);
             return false;
         }
         Tracing.finishSuccess(limitsSpan);
@@ -191,7 +201,7 @@ public class LazySessionHandler implements SessionHandler {
             ingressSpan.setTag("outcome", "not_found");
             Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "ingress_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         Tracing.finishSuccess(ingressSpan);
@@ -205,7 +215,7 @@ public class LazySessionHandler implements SessionHandler {
             LOGGER.warn(formatLogMessage(correlationId, "Service already exists for session."));
             setSessionHandled(session, correlationId, "Service already exists.");
             span.setTag("outcome", "idempotent_service_exists");
-            span.setStatus(SpanStatus.OK);
+            Tracing.finish(span, SpanStatus.OK);
             return true;
         }
 
@@ -219,7 +229,7 @@ public class LazySessionHandler implements SessionHandler {
             serviceSpan.setTag("outcome", "failed");
             Tracing.finish(serviceSpan, SpanStatus.INTERNAL_ERROR);
             span.setTag("outcome", "service_creation_failed");
-            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             return false;
         }
         Tracing.finishSuccess(serviceSpan);
@@ -234,7 +244,7 @@ public class LazySessionHandler implements SessionHandler {
             internalServiceSpan.setTag("outcome", "failed");
             Tracing.finish(internalServiceSpan, SpanStatus.INTERNAL_ERROR);
             span.setTag("outcome", "internal_service_failed");
-            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             return false;
         }
         Tracing.finishSuccess(internalServiceSpan);
@@ -250,7 +260,7 @@ public class LazySessionHandler implements SessionHandler {
                 configMapSpan.setTag("outcome", "already_exists");
                 Tracing.finish(configMapSpan, SpanStatus.OK);
                 span.setTag("outcome", "idempotent_configmaps_exist");
-                span.setStatus(SpanStatus.OK);
+                Tracing.finish(span, SpanStatus.OK);
                 return true;
             }
             resourceFactory.createEmailConfigMapForLazySession(session, labels, correlationId);
@@ -265,7 +275,7 @@ public class LazySessionHandler implements SessionHandler {
             LOGGER.warn(formatLogMessage(correlationId, "Deployment already exists for session."));
             setSessionHandled(session, correlationId, "Deployment already exists.");
             span.setTag("outcome", "idempotent_deployment_exists");
-            span.setStatus(SpanStatus.OK);
+            Tracing.finish(span, SpanStatus.OK);
             return true;
         }
 
@@ -275,9 +285,15 @@ public class LazySessionHandler implements SessionHandler {
         deploymentSpan.setData("has_storage", storageName.isPresent());
         resourceFactory.createDeploymentForLazySession(
                 session, appDef, storageName, labels,
-                deployment -> storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec)),
+                deployment -> {
+                    storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec));
+                    languageServerManager.injectEnvVars(deployment, session, appDef, correlationId);
+                },
                 correlationId);
         Tracing.finishSuccess(deploymentSpan);
+
+        // Create language server
+        languageServerManager.createLanguageServer(session, appDef, storageName, correlationId);
 
         // Add ingress rule
         ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_ingress_rule", "Add ingress rule");
@@ -292,7 +308,7 @@ public class LazySessionHandler implements SessionHandler {
             setSessionError(session, correlationId, "Failed to edit ingress.");
             Tracing.finishError(ingressRuleSpan, e);
             span.setTag("outcome", "ingress_rule_failed");
-            span.setStatus(SpanStatus.INTERNAL_ERROR);
+            Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             return false;
         }
 
@@ -304,14 +320,19 @@ public class LazySessionHandler implements SessionHandler {
 
         setSessionHandled(session, correlationId, null);
         span.setTag("outcome", "success");
-        span.setStatus(SpanStatus.OK);
-        span.finish();
+        Tracing.finishSuccess(span);
         return true;
     }
 
     @Override
     public synchronized boolean sessionDeleted(Session session, String correlationId, ISpan parentSpan) {
-        return doSessionDeleted(session, correlationId, parentSpan);
+        ISpan span = Tracing.childSpan(parentSpan, "lazy.cleanup", "Lazy session cleanup");
+        try {
+            return doSessionDeleted(session, correlationId, span);
+        } catch (Exception e) {
+            Tracing.finishError(span, e);
+            throw e;
+        }
     }
 
     protected boolean doSessionDeleted(Session session, String correlationId, ISpan span) {
@@ -324,7 +345,6 @@ public class LazySessionHandler implements SessionHandler {
         span.setTag("session.strategy", "lazy");
         span.setTag("app_definition", appDefinitionID);
         span.setData("correlation_id", correlationId);
-
         ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
         Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
         if (appDefOpt.isEmpty()) {
@@ -333,7 +353,7 @@ public class LazySessionHandler implements SessionHandler {
             appDefSpan.setTag("outcome", "not_found");
             Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "appdef_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         AppDefinition appDef = appDefOpt.get();
@@ -346,7 +366,7 @@ public class LazySessionHandler implements SessionHandler {
             ingressSpan.setTag("outcome", "not_found");
             Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "ingress_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         Tracing.finishSuccess(ingressSpan);
@@ -361,12 +381,18 @@ public class LazySessionHandler implements SessionHandler {
             removeRulesSpan.setTag("outcome", "failed");
             Tracing.finish(removeRulesSpan, SpanStatus.INTERNAL_ERROR);
             span.setTag("outcome", "remove_rules_failed");
+            Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             return false;
         }
         Tracing.finishSuccess(removeRulesSpan);
 
         LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up ingress rules for session"));
+
+        // Cleanup language server resources for lazy sessions.
+        languageServerManager.deleteLanguageServer(session, correlationId);
+
         span.setTag("outcome", "success");
+        Tracing.finishSuccess(span);
         return true;
     }
 

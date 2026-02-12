@@ -32,6 +32,7 @@ import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
 import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool;
 import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.util.SessionEnvCollector;
@@ -74,6 +75,9 @@ public class EagerSessionHandler implements SessionHandler {
 
     @Inject
     private IngressManager ingressManager;
+
+    @Inject
+    private LanguageServerManager languageServerManager;
 
     @Inject
     private SessionEnvCollector sessionEnvCollector;
@@ -175,6 +179,12 @@ public class EagerSessionHandler implements SessionHandler {
                 return EagerSessionAddedOutcome.ERROR;
             }
             Tracing.finishSuccess(setupSpan);
+
+            // Create language server
+            languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId);
+
+            // Patch environment variables into the existing Theia deployment
+            languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId);
 
             // Schedule async credential injection via data bridge (tracked in separate transaction)
             if (DataBridgeUtil.isDataBridgeEnabled(appDef.getSpec())) {

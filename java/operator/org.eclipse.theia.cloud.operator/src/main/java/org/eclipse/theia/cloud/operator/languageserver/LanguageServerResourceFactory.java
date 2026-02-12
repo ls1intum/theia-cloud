@@ -25,9 +25,9 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
-import org.eclipse.theia.cloud.operator.util.SentryHelper;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudPersistentVolumeUtil;
 
 import com.google.inject.Inject;
@@ -76,7 +76,7 @@ public class LanguageServerResourceFactory {
         String sessionUID = session.getMetadata().getUid();
         String deploymentName = getDeploymentName(session);
 
-        ISpan span = SentryHelper.startSpan("ls.deployment.create", "Create LS deployment");
+        ISpan span = Tracing.childSpan("ls.deployment.create", "Create LS deployment");
         span.setTag("language", config.languageKey());
         span.setData("session", sessionName);
         span.setData("deployment_name", deploymentName);
@@ -120,12 +120,13 @@ public class LanguageServerResourceFactory {
 
             if (deploymentOpt.isPresent()) {
                 span.setData("deployment_uid", deploymentOpt.get().getMetadata().getUid());
-                SentryHelper.finishSuccess(span);
+                Tracing.finishSuccess(span);
                 LOGGER.info(formatLogMessage(correlationId, 
                     "[LS] Successfully created deployment " + deploymentName));
                 return deploymentOpt;
             } else {
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 LOGGER.error(formatLogMessage(correlationId, 
                     "[LS] Failed to create deployment " + deploymentName));
                 return Optional.empty();
@@ -134,7 +135,7 @@ public class LanguageServerResourceFactory {
         } catch (IOException | URISyntaxException e) {
             LOGGER.error(formatLogMessage(correlationId, 
                 "[LS] Error creating deployment " + deploymentName), e);
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             return Optional.empty();
         }
     }
@@ -148,7 +149,7 @@ public class LanguageServerResourceFactory {
         String sessionUID = session.getMetadata().getUid();
         String serviceName = getServiceName(session);
 
-        ISpan span = SentryHelper.startSpan("ls.service.create", "Create LS service");
+        ISpan span = Tracing.childSpan("ls.service.create", "Create LS service");
         span.setTag("language", config.languageKey());
         span.setData("session", sessionName);
         span.setData("service_name", serviceName);
@@ -180,12 +181,13 @@ public class LanguageServerResourceFactory {
 
             if (serviceOpt.isPresent()) {
                 span.setData("service_uid", serviceOpt.get().getMetadata().getUid());
-                SentryHelper.finishSuccess(span);
+                Tracing.finishSuccess(span);
                 LOGGER.info(formatLogMessage(correlationId, 
                     "[LS] Successfully created service " + serviceName));
                 return serviceOpt;
             } else {
-                SentryHelper.finishWithOutcome(span, "failure", SpanStatus.INTERNAL_ERROR);
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
                 LOGGER.error(formatLogMessage(correlationId, 
                     "[LS] Failed to create service " + serviceName));
                 return Optional.empty();
@@ -194,7 +196,7 @@ public class LanguageServerResourceFactory {
         } catch (IOException | URISyntaxException e) {
             LOGGER.error(formatLogMessage(correlationId, 
                 "[LS] Error creating service " + serviceName), e);
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             return Optional.empty();
         }
     }
@@ -208,7 +210,7 @@ public class LanguageServerResourceFactory {
 
         String serviceName = getServiceName(session);
 
-        ISpan span = SentryHelper.startSpan("ls.inject_env", "Inject LS env vars");
+        ISpan span = Tracing.childSpan("ls.inject_env", "Inject LS env vars");
         span.setTag("language", config.languageKey());
         span.setData("service_name", serviceName);
 
@@ -222,7 +224,8 @@ public class LanguageServerResourceFactory {
             if (containerIdx.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId, 
                     "[LS] Could not find container " + containerName + " in deployment"));
-                SentryHelper.finishWithOutcome(span, "container_not_found", SpanStatus.NOT_FOUND);
+                span.setTag("outcome", "container_not_found");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return;
             }
 
@@ -259,21 +262,21 @@ public class LanguageServerResourceFactory {
                 .withValue(config.languageKey())
                 .build());
 
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
             LOGGER.info(formatLogMessage(correlationId, 
                 "[LS] Successfully injected env vars: " + config.hostEnvVar() + "=" + serviceName));
 
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, 
                 "[LS] Error injecting env vars"), e);
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
         }
     }
 
     public void deleteResources(Session session, String correlationId) {
         String resourceName = getDeploymentName(session);
 
-        ISpan span = SentryHelper.startSpan("ls.delete", "Delete LS resources");
+        ISpan span = Tracing.childSpan("ls.delete", "Delete LS resources");
         span.setData("resource_name", resourceName);
 
         LOGGER.info(formatLogMessage(correlationId, "[LS] Deleting resources: " + resourceName));
@@ -282,13 +285,13 @@ public class LanguageServerResourceFactory {
             client.kubernetes().apps().deployments().withName(resourceName).delete();
             client.kubernetes().services().withName(resourceName).delete();
 
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
             LOGGER.info(formatLogMessage(correlationId, "[LS] Deleted resources: " + resourceName));
 
         } catch (Exception e) {
             LOGGER.debug(formatLogMessage(correlationId, 
                 "[LS] Resources already deleted or not found: " + resourceName));
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
         }
     }
 
@@ -301,7 +304,7 @@ public class LanguageServerResourceFactory {
 
         String serviceName = getServiceName(session);
 
-        ISpan span = SentryHelper.startSpan("ls.patch_env", "Patch LS env vars into existing deployment");
+        ISpan span = Tracing.childSpan("ls.patch_env", "Patch LS env vars into existing deployment");
         span.setTag("language", config.languageKey());
         span.setData("deployment", deploymentName);
         span.setData("service_name", serviceName);
@@ -310,7 +313,7 @@ public class LanguageServerResourceFactory {
             "[LS] Patching env vars into deployment " + deploymentName + " for language " + config.languageKey()));
 
         try {
-            Deployment updated = client.kubernetes().apps().deployments()
+            client.kubernetes().apps().deployments()
                 .withName(deploymentName)
                 .edit(deployment -> {
                     String containerName = appDef.getSpec().getName();
@@ -357,7 +360,7 @@ public class LanguageServerResourceFactory {
                     return deployment;
                 });
 
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
             LOGGER.info(formatLogMessage(correlationId,
                 "[LS] Successfully patched env vars: " + config.hostEnvVar() + "=" + serviceName));
             return true;
@@ -365,7 +368,7 @@ public class LanguageServerResourceFactory {
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId,
                 "[LS] Error patching env vars into " + deploymentName), e);
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             return false;
         }
     }

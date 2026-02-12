@@ -17,7 +17,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
-import org.eclipse.theia.cloud.operator.util.SentryHelper;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
@@ -52,13 +52,13 @@ public class LanguageServerManager {
             Optional<String> pvcName,
             String correlationId) {
 
-        ISpan span = SentryHelper.startSpan("ls.create", "Create language server");
+        ISpan span = Tracing.childSpan("ls.create", "Create language server");
 
         try {
             Optional<LanguageServerConfig> configOpt = getLanguageServerConfig(appDef);
             if (configOpt.isEmpty()) {
                 span.setTag("outcome", "not_required");
-                SentryHelper.finishSuccess(span);
+                Tracing.finishSuccess(span);
                 LOGGER.debug(formatLogMessage(correlationId, 
                     "[LS] No language server configured for " + appDef.getSpec().getName()));
                 return true;
@@ -73,28 +73,30 @@ public class LanguageServerManager {
                 "[LS] Creating language server for session " + session.getMetadata().getName() + 
                 " (language: " + config.languageKey() + ", image: " + config.image() + ")"));
 
-            ISpan svcSpan = span.startChild("ls.service.create", "Create LS service");
+            ISpan svcSpan = Tracing.childSpan(span, "ls.service.create", "Create LS service");
             Optional<Service> service = factory.createService(session, config, correlationId);
             if (service.isEmpty()) {
-                SentryHelper.finishWithOutcome(svcSpan, "failure", SpanStatus.INTERNAL_ERROR);
-                SentryHelper.finishError(span, new RuntimeException("Failed to create LS service"));
+                svcSpan.setTag("outcome", "failure");
+                Tracing.finish(svcSpan, SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(span, new RuntimeException("Failed to create LS service"));
                 return false;
             }
-            SentryHelper.finishSuccess(svcSpan);
+            Tracing.finishSuccess(svcSpan);
 
-            ISpan depSpan = span.startChild("ls.deployment.create", "Create LS deployment");
+            ISpan depSpan = Tracing.childSpan(span, "ls.deployment.create", "Create LS deployment");
             Optional<Deployment> deployment = factory.createDeployment(
                 session, config, pvcName, appDef.getSpec(), correlationId);
             if (deployment.isEmpty()) {
-                SentryHelper.finishWithOutcome(depSpan, "failure", SpanStatus.INTERNAL_ERROR);
-                SentryHelper.finishError(span, new RuntimeException("Failed to create LS deployment"));
+                depSpan.setTag("outcome", "failure");
+                Tracing.finish(depSpan, SpanStatus.INTERNAL_ERROR);
+                Tracing.finishError(span, new RuntimeException("Failed to create LS deployment"));
                 return false;
             }
-            SentryHelper.finishSuccess(depSpan);
+            Tracing.finishSuccess(depSpan);
 
             span.setData("ls_service", service.get().getMetadata().getName());
             span.setData("ls_deployment", deployment.get().getMetadata().getName());
-            SentryHelper.finishSuccess(span);
+            Tracing.finishSuccess(span);
 
             LOGGER.info(formatLogMessage(correlationId, 
                 "[LS] Successfully created language server for session " + session.getMetadata().getName()));
@@ -103,7 +105,7 @@ public class LanguageServerManager {
 
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "[LS] Error creating language server"), e);
-            SentryHelper.finishError(span, e);
+            Tracing.finishError(span, e);
             return false;
         }
     }

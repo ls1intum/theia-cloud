@@ -210,21 +210,11 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         try {
             AppDefinition appDefinition = appDefinitionCache.get(uid);
             switch (action) {
-                case ADDED:
-                    appDefinitionAddedHandler.appDefinitionAdded(appDefinition, correlationId);
-                    break;
-                case DELETED:
-                    appDefinitionAddedHandler.appDefinitionDeleted(appDefinition, correlationId);
-                    break;
-                case MODIFIED:
-                    appDefinitionAddedHandler.appDefinitionModified(appDefinition, correlationId);
-                    break;
-                case ERROR:
-                    appDefinitionAddedHandler.appDefinitionErrored(appDefinition, correlationId);
-                    break;
-                case BOOKMARK:
-                    appDefinitionAddedHandler.appDefinitionBookmarked(appDefinition, correlationId);
-                    break;
+                case ADDED -> appDefinitionAddedHandler.appDefinitionAdded(appDefinition, correlationId);
+                case DELETED -> appDefinitionAddedHandler.appDefinitionDeleted(appDefinition, correlationId);
+                case MODIFIED -> appDefinitionAddedHandler.appDefinitionModified(appDefinition, correlationId);
+                case ERROR -> appDefinitionAddedHandler.appDefinitionErrored(appDefinition, correlationId);
+                case BOOKMARK -> appDefinitionAddedHandler.appDefinitionBookmarked(appDefinition, correlationId);
             }
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling app definitions"), e);
@@ -253,21 +243,11 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
             span.setData("correlation_id", correlationId);
 
             switch (action) {
-                case ADDED:
-                    sessionHandler.sessionAdded(session, correlationId, span);
-                    break;
-                case DELETED:
-                    sessionHandler.sessionDeleted(session, correlationId, span);
-                    break;
-                case MODIFIED:
-                    sessionHandler.sessionModified(session, correlationId, span);
-                    break;
-                case ERROR:
-                    sessionHandler.sessionErrored(session, correlationId, span);
-                    break;
-                case BOOKMARK:
-                    sessionHandler.sessionBookmarked(session, correlationId, span);
-                    break;
+                case ADDED -> sessionHandler.sessionAdded(session, correlationId, span);
+                case DELETED -> sessionHandler.sessionDeleted(session, correlationId, span);
+                case MODIFIED -> sessionHandler.sessionModified(session, correlationId, span);
+                case ERROR -> sessionHandler.sessionErrored(session, correlationId, span);
+                case BOOKMARK -> sessionHandler.sessionBookmarked(session, correlationId, span);
             }
 
             Tracing.finishSuccess(span);
@@ -302,21 +282,11 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
             span.setData("correlation_id", event.correlationId);
 
             switch (event.action) {
-                case ADDED:
-                    sessionHandler.sessionAdded(event.session, event.correlationId, span);
-                    break;
-                case DELETED:
-                    sessionHandler.sessionDeleted(event.session, event.correlationId, span);
-                    break;
-                case MODIFIED:
-                    sessionHandler.sessionModified(event.session, event.correlationId, span);
-                    break;
-                case ERROR:
-                    sessionHandler.sessionErrored(event.session, event.correlationId, span);
-                    break;
-                case BOOKMARK:
-                    sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
-                    break;
+                case ADDED -> sessionHandler.sessionAdded(event.session, event.correlationId, span);
+                case DELETED -> sessionHandler.sessionDeleted(event.session, event.correlationId, span);
+                case MODIFIED -> sessionHandler.sessionModified(event.session, event.correlationId, span);
+                case ERROR -> sessionHandler.sessionErrored(event.session, event.correlationId, span);
+                case BOOKMARK -> sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
             }
             Tracing.finishSuccess(span);
         } catch (Exception e) {
@@ -394,21 +364,11 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         try {
             Workspace workspace = workspaceCache.get(uid);
             switch (action) {
-                case ADDED:
-                    workspaceHandler.workspaceAdded(workspace, correlationId);
-                    break;
-                case DELETED:
-                    workspaceHandler.workspaceDeleted(workspace, correlationId);
-                    break;
-                case MODIFIED:
-                    workspaceHandler.workspaceModified(workspace, correlationId);
-                    break;
-                case ERROR:
-                    workspaceHandler.workspaceErrored(workspace, correlationId);
-                    break;
-                case BOOKMARK:
-                    workspaceHandler.workspaceBookmarked(workspace, correlationId);
-                    break;
+                case ADDED -> workspaceHandler.workspaceAdded(workspace, correlationId);
+                case DELETED -> workspaceHandler.workspaceDeleted(workspace, correlationId);
+                case MODIFIED -> workspaceHandler.workspaceModified(workspace, correlationId);
+                case ERROR -> workspaceHandler.workspaceErrored(workspace, correlationId);
+                case BOOKMARK -> workspaceHandler.workspaceBookmarked(workspace, correlationId);
             }
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling workspaces"), e);

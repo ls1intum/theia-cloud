@@ -287,7 +287,6 @@ public class LazySessionHandler implements SessionHandler {
             return false;
         }
 
-        // Schedule async URL availability check (tracked in separate transaction: session.url_availability)
         Sentry.addBreadcrumb("Scheduling URL availability check for " + host, "session");
         AddedHandlerUtil.updateSessionURLAsync(client.sessions(), session, client.namespace(), host, correlationId,
                 span);

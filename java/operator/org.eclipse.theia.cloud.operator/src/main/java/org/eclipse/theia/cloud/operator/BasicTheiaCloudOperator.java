@@ -49,6 +49,7 @@ import org.eclipse.theia.cloud.operator.plugins.OperatorPlugin;
 import org.eclipse.theia.cloud.operator.util.SpecWatch;
 
 import io.sentry.ISpan;
+import io.sentry.Sentry;
 
 import com.google.inject.Inject;
 
@@ -91,7 +92,8 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     private final Map<String, Session> sessionCache = new ConcurrentHashMap<>();
     private final Set<SpecWatch<?>> watches = new LinkedHashSet<>();
 
-    // Session event scheduling: per-session serialization, cross-session parallelism.
+    // Session event scheduling: per-session serialization, cross-session
+    // parallelism.
     private ExecutorService sessionExecutor;
     private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
 
@@ -208,21 +210,21 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         try {
             AppDefinition appDefinition = appDefinitionCache.get(uid);
             switch (action) {
-            case ADDED:
-                appDefinitionAddedHandler.appDefinitionAdded(appDefinition, correlationId);
-                break;
-            case DELETED:
-                appDefinitionAddedHandler.appDefinitionDeleted(appDefinition, correlationId);
-                break;
-            case MODIFIED:
-                appDefinitionAddedHandler.appDefinitionModified(appDefinition, correlationId);
-                break;
-            case ERROR:
-                appDefinitionAddedHandler.appDefinitionErrored(appDefinition, correlationId);
-                break;
-            case BOOKMARK:
-                appDefinitionAddedHandler.appDefinitionBookmarked(appDefinition, correlationId);
-                break;
+                case ADDED:
+                    appDefinitionAddedHandler.appDefinitionAdded(appDefinition, correlationId);
+                    break;
+                case DELETED:
+                    appDefinitionAddedHandler.appDefinitionDeleted(appDefinition, correlationId);
+                    break;
+                case MODIFIED:
+                    appDefinitionAddedHandler.appDefinitionModified(appDefinition, correlationId);
+                    break;
+                case ERROR:
+                    appDefinitionAddedHandler.appDefinitionErrored(appDefinition, correlationId);
+                    break;
+                case BOOKMARK:
+                    appDefinitionAddedHandler.appDefinitionBookmarked(appDefinition, correlationId);
+                    break;
             }
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling app definitions"), e);
@@ -237,7 +239,7 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
         // Extract trace context from Session annotations (if propagated from service)
         Optional<TraceContext> traceContext = TraceContext.fromMetadata(session.getMetadata());
-        
+
         ISpan span = null;
         try {
             String name = "session." + action.name().toLowerCase();
@@ -246,28 +248,28 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
             span.setTag("session.name", session.getSpec().getName());
             span.setTag("app_definition", session.getSpec().getAppDefinition());
             span.setTag("user", session.getSpec().getUser());
-            
+
             span.setTag("action", action.name());
             span.setData("correlation_id", correlationId);
 
             switch (action) {
-            case ADDED:
-                sessionHandler.sessionAdded(session, correlationId, span);
-                break;
-            case DELETED:
-                sessionHandler.sessionDeleted(session, correlationId, span);
-                break;
-            case MODIFIED:
-                sessionHandler.sessionModified(session, correlationId, span);
-                break;
-            case ERROR:
-                sessionHandler.sessionErrored(session, correlationId, span);
-                break;
-            case BOOKMARK:
-                sessionHandler.sessionBookmarked(session, correlationId, span);
-                break;
+                case ADDED:
+                    sessionHandler.sessionAdded(session, correlationId, span);
+                    break;
+                case DELETED:
+                    sessionHandler.sessionDeleted(session, correlationId, span);
+                    break;
+                case MODIFIED:
+                    sessionHandler.sessionModified(session, correlationId, span);
+                    break;
+                case ERROR:
+                    sessionHandler.sessionErrored(session, correlationId, span);
+                    break;
+                case BOOKMARK:
+                    sessionHandler.sessionBookmarked(session, correlationId, span);
+                    break;
             }
-            
+
             Tracing.finishSuccess(span);
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling sessions"), e);
@@ -282,7 +284,7 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
 
     private void handleSessionEvent(SessionEvent event) {
         if (event.session == null) {
-            return;
+            throw new IllegalArgumentException("Session must not be null");
         }
         // Extract trace context from Session annotations (if propagated from service)
         Optional<TraceContext> traceContext = TraceContext.fromMetadata(event.session.getMetadata());
@@ -300,21 +302,21 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
             span.setData("correlation_id", event.correlationId);
 
             switch (event.action) {
-            case ADDED:
-                sessionHandler.sessionAdded(event.session, event.correlationId, span);
-                break;
-            case DELETED:
-                sessionHandler.sessionDeleted(event.session, event.correlationId, span);
-                break;
-            case MODIFIED:
-                sessionHandler.sessionModified(event.session, event.correlationId, span);
-                break;
-            case ERROR:
-                sessionHandler.sessionErrored(event.session, event.correlationId, span);
-                break;
-            case BOOKMARK:
-                sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
-                break;
+                case ADDED:
+                    sessionHandler.sessionAdded(event.session, event.correlationId, span);
+                    break;
+                case DELETED:
+                    sessionHandler.sessionDeleted(event.session, event.correlationId, span);
+                    break;
+                case MODIFIED:
+                    sessionHandler.sessionModified(event.session, event.correlationId, span);
+                    break;
+                case ERROR:
+                    sessionHandler.sessionErrored(event.session, event.correlationId, span);
+                    break;
+                case BOOKMARK:
+                    sessionHandler.sessionBookmarked(event.session, event.correlationId, span);
+                    break;
             }
             Tracing.finishSuccess(span);
         } catch (Exception e) {
@@ -344,7 +346,12 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
                     break;
                 }
             }
-            handleSessionEvent(event);
+            try {
+                handleSessionEvent(event);
+            } catch (IllegalArgumentException e) {
+                LOGGER.error(formatLogMessage(event.correlationId, "Error while handling sessions"), e);
+                Sentry.captureException(e);
+            }
         }
         tryCleanupSessionState(uid, state);
     }
@@ -387,21 +394,21 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
         try {
             Workspace workspace = workspaceCache.get(uid);
             switch (action) {
-            case ADDED:
-                workspaceHandler.workspaceAdded(workspace, correlationId);
-                break;
-            case DELETED:
-                workspaceHandler.workspaceDeleted(workspace, correlationId);
-                break;
-            case MODIFIED:
-                workspaceHandler.workspaceModified(workspace, correlationId);
-                break;
-            case ERROR:
-                workspaceHandler.workspaceErrored(workspace, correlationId);
-                break;
-            case BOOKMARK:
-                workspaceHandler.workspaceBookmarked(workspace, correlationId);
-                break;
+                case ADDED:
+                    workspaceHandler.workspaceAdded(workspace, correlationId);
+                    break;
+                case DELETED:
+                    workspaceHandler.workspaceDeleted(workspace, correlationId);
+                    break;
+                case MODIFIED:
+                    workspaceHandler.workspaceModified(workspace, correlationId);
+                    break;
+                case ERROR:
+                    workspaceHandler.workspaceErrored(workspace, correlationId);
+                    break;
+                case BOOKMARK:
+                    workspaceHandler.workspaceBookmarked(workspace, correlationId);
+                    break;
             }
         } catch (Exception e) {
             LOGGER.error(formatLogMessage(correlationId, "Error while handling workspaces"), e);
@@ -435,8 +442,10 @@ public class BasicTheiaCloudOperator implements TheiaCloudOperator {
     }
 
     /**
-     * If watches have not been called at all (neither reconnecting calls or actual actions), this might mean that the
-     * watch can't communicate with the kube API anymore. In this case we want to hand over to a different operator
+     * If watches have not been called at all (neither reconnecting calls or actual
+     * actions), this might mean that the
+     * watch can't communicate with the kube API anymore. In this case we want to
+     * hand over to a different operator
      * which will start up fresh watches.
      */
     protected void lookForIdleWatches() {

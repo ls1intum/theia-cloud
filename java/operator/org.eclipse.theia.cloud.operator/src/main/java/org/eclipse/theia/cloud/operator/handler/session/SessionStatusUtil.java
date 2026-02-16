@@ -19,8 +19,23 @@ public final class SessionStatusUtil {
     private SessionStatusUtil() {
     }
 
+    /**
+     * Evaluates the session status and returns the appropriate pre-handle result.
+     *
+     * @param session the session to evaluate
+     * @param client the Kubernetes client
+     * @param correlationId the correlation ID for tracking
+     * @param logger the logger instance
+     * @return the pre-handle result indicating how to proceed
+     */
     public static PreHandleResult evaluateStatus(Session session, TheiaCloudClient client, String correlationId,
             Logger logger) {
+        if (session == null) {
+            throw new IllegalArgumentException("Session must not be null");
+        }
+        if (client == null) {
+            throw new IllegalArgumentException("Client must not be null");
+        }
         Optional<SessionStatus> status = Optional.ofNullable(session.getStatus());
         String operatorStatus = status.map(ResourceStatus::getOperatorStatus).orElse(OperatorStatus.NEW);
 
@@ -38,11 +53,38 @@ public final class SessionStatusUtil {
         return PreHandleResult.PROCEED;
     }
 
+    /**
+     * Marks the session as currently being handled.
+     *
+     * @param client the Kubernetes client
+     * @param session the session to mark
+     * @param correlationId the correlation ID for tracking
+     */
     public static void markHandling(TheiaCloudClient client, Session session, String correlationId) {
+        if (session == null) {
+            throw new IllegalArgumentException("Session must not be null");
+        }
+        if (client == null) {
+            throw new IllegalArgumentException("Client must not be null");
+        }
         client.sessions().updateStatus(correlationId, session, s -> s.setOperatorStatus(OperatorStatus.HANDLING));
     }
 
+    /**
+     * Marks the session as successfully handled.
+     *
+     * @param client the Kubernetes client
+     * @param session the session to mark
+     * @param correlationId the correlation ID for tracking
+     * @param message optional message to set on the session status
+     */
     public static void markHandled(TheiaCloudClient client, Session session, String correlationId, String message) {
+        if (session == null) {
+            throw new IllegalArgumentException("Session must not be null");
+        }
+        if (client == null) {
+            throw new IllegalArgumentException("Client must not be null");
+        }
         client.sessions().updateStatus(correlationId, session, s -> {
             s.setOperatorStatus(OperatorStatus.HANDLED);
             if (message != null) {
@@ -52,7 +94,21 @@ public final class SessionStatusUtil {
         });
     }
 
+    /**
+     * Marks the session with an error status.
+     *
+     * @param client the Kubernetes client
+     * @param session the session to mark
+     * @param correlationId the correlation ID for tracking
+     * @param message the error message to set
+     */
     public static void markError(TheiaCloudClient client, Session session, String correlationId, String message) {
+        if (session == null) {
+            throw new IllegalArgumentException("Session must not be null");
+        }
+        if (client == null) {
+            throw new IllegalArgumentException("Client must not be null");
+        }
         client.sessions().updateStatus(correlationId, session, s -> {
             s.setOperatorStatus(OperatorStatus.ERROR);
             s.setOperatorMessage(message);

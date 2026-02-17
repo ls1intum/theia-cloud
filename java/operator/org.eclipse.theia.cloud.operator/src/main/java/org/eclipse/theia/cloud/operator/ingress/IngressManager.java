@@ -199,6 +199,7 @@ public class IngressManager {
                 }
 
                 List<Map<String, Object>> rules = getRuleList(specMap);
+                rules.add(createRedirectRule(spec.path));
                 rules.add(createRouteRule(spec.serviceName, spec.port, spec.path));
             });
             LOGGER.info(formatLogMessage(correlationId,
@@ -339,6 +340,19 @@ public class IngressManager {
         matches.add(match);
         rule.put("matches", matches);
 
+        Map<String, Object> forwardedUriHeader = new HashMap<>();
+        forwardedUriHeader.put("name", "X-Forwarded-Uri");
+        forwardedUriHeader.put("value", "%REQ(:PATH)%");
+        List<Map<String, Object>> setHeaders = new ArrayList<>();
+        setHeaders.add(forwardedUriHeader);
+
+        Map<String, Object> requestHeaderModifier = new HashMap<>();
+        requestHeaderModifier.put("set", setHeaders);
+
+        Map<String, Object> requestHeaderFilter = new HashMap<>();
+        requestHeaderFilter.put("type", "RequestHeaderModifier");
+        requestHeaderFilter.put("requestHeaderModifier", requestHeaderModifier);
+
         Map<String, Object> rewritePath = new HashMap<>();
         rewritePath.put("type", "ReplacePrefixMatch");
         rewritePath.put("replacePrefixMatch", "/");
@@ -351,6 +365,7 @@ public class IngressManager {
         filter.put("urlRewrite", urlRewrite);
 
         List<Map<String, Object>> filters = new ArrayList<>();
+        filters.add(requestHeaderFilter);
         filters.add(filter);
         rule.put("filters", filters);
 
@@ -363,6 +378,42 @@ public class IngressManager {
         rule.put("backendRefs", backendRefs);
 
         return rule;
+    }
+
+    private Map<String, Object> createRedirectRule(String path) {
+        Map<String, Object> rule = new HashMap<>();
+
+        Map<String, Object> match = new HashMap<>();
+        Map<String, Object> matchPath = new HashMap<>();
+        matchPath.put("type", "Exact");
+        matchPath.put("value", path);
+        match.put("path", matchPath);
+
+        List<Map<String, Object>> matches = new ArrayList<>();
+        matches.add(match);
+        rule.put("matches", matches);
+
+        Map<String, Object> redirectPath = new HashMap<>();
+        redirectPath.put("type", "ReplaceFullPath");
+        redirectPath.put("replaceFullPath", ensureTrailingSlash(path));
+
+        Map<String, Object> requestRedirect = new HashMap<>();
+        requestRedirect.put("statusCode", 302);
+        requestRedirect.put("path", redirectPath);
+
+        Map<String, Object> redirectFilter = new HashMap<>();
+        redirectFilter.put("type", "RequestRedirect");
+        redirectFilter.put("requestRedirect", requestRedirect);
+
+        List<Map<String, Object>> filters = new ArrayList<>();
+        filters.add(redirectFilter);
+        rule.put("filters", filters);
+
+        return rule;
+    }
+
+    private String ensureTrailingSlash(String value) {
+        return value.endsWith("/") ? value : value + "/";
     }
 
     @SuppressWarnings("unchecked")

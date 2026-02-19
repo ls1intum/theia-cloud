@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -31,6 +32,9 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 public class IngressManager {
 
     private static final Logger LOGGER = LogManager.getLogger(IngressManager.class);
+    private static final int HTTP_CONFLICT = 409;
+    private static final int ROUTE_EDIT_MAX_RETRIES = 5;
+    private static final long ROUTE_EDIT_RETRY_BACKOFF_MS = 100L;
 
     @Inject
     private TheiaCloudClient client;
@@ -188,7 +192,7 @@ public class IngressManager {
      */
     public synchronized void addRule(GenericKubernetesResource route, IngressRuleSpec spec, String correlationId) {
         try {
-            client.httpRoutes().edit(correlationId, route.getMetadata().getName(), routeToUpdate -> {
+            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
                 Map<String, Object> specMap = getSpec(routeToUpdate);
 
                 List<String> hostnames = getStringList(specMap, "hostnames");
@@ -201,7 +205,7 @@ public class IngressManager {
                 List<Map<String, Object>> rules = getRuleList(specMap);
                 rules.add(createRedirectRule(spec.path));
                 rules.add(createRouteRule(spec.serviceName, spec.port, spec.path));
-            });
+            }, correlationId);
             LOGGER.info(formatLogMessage(correlationId,
                     "Added HTTPRoute rule for path " + spec.path + " to " + route.getMetadata().getName()));
         } catch (KubernetesClientException e) {
@@ -254,12 +258,11 @@ public class IngressManager {
      */
     public synchronized void removeRuleByPath(GenericKubernetesResource route, String path, String correlationId) {
         try {
-            client.httpRoutes().resource(route.getMetadata().getName()).edit(routeToUpdate -> {
+            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
                 Map<String, Object> specMap = getSpec(routeToUpdate);
                 List<Map<String, Object>> rules = getRuleList(specMap);
                 rules.removeIf(rule -> hasPathMatch(rule, path));
-                return routeToUpdate;
-            });
+            }, correlationId);
             LOGGER.info(formatLogMessage(correlationId,
                     "Removed HTTPRoute rule for path " + path + " from " + route.getMetadata().getName()));
         } catch (KubernetesClientException e) {
@@ -279,12 +282,11 @@ public class IngressManager {
             String correlationId) {
 
         try {
-            client.httpRoutes().resource(route.getMetadata().getName()).edit(routeToUpdate -> {
+            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
                 Map<String, Object> specMap = getSpec(routeToUpdate);
                 List<Map<String, Object>> rules = getRuleList(specMap);
                 rules.removeIf(rule -> hasPathMatch(rule, path));
-                return routeToUpdate;
-            });
+            }, correlationId);
             LOGGER.info(formatLogMessage(correlationId,
                     "Removed HTTPRoute rules for path " + path + " from " + route.getMetadata().getName()));
             return true;
@@ -333,7 +335,7 @@ public class IngressManager {
         Map<String, Object> match = new HashMap<>();
         Map<String, Object> matchPath = new HashMap<>();
         matchPath.put("type", "PathPrefix");
-        matchPath.put("value", path);
+        matchPath.put("value", ensureTrailingSlash(path));
         match.put("path", matchPath);
 
         List<Map<String, Object>> matches = new ArrayList<>();
@@ -433,10 +435,46 @@ public class IngressManager {
             }
             Map<String, Object> pathMap = (Map<String, Object>) pathObj;
             Object value = pathMap.get("value");
-            if (path.equals(value)) {
+            if (value instanceof String
+                    && normalizePath(path).equals(normalizePath((String) value))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void editRouteWithRetry(String routeName, Consumer<GenericKubernetesResource> editor, String correlationId) {
+        for (int attempt = 1; attempt <= ROUTE_EDIT_MAX_RETRIES; attempt++) {
+            try {
+                client.httpRoutes().resource(routeName).edit(routeToUpdate -> {
+                    editor.accept(routeToUpdate);
+                    return routeToUpdate;
+                });
+                return;
+            } catch (KubernetesClientException e) {
+                if (e.getCode() != HTTP_CONFLICT || attempt == ROUTE_EDIT_MAX_RETRIES) {
+                    throw e;
+                }
+                LOGGER.warn(formatLogMessage(correlationId,
+                        "HTTPRoute edit conflict for " + routeName + " (attempt "
+                                + attempt + "/" + ROUTE_EDIT_MAX_RETRIES + "). Retrying."));
+                try {
+                    Thread.sleep(ROUTE_EDIT_RETRY_BACKOFF_MS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private String normalizePath(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.length() > 1 && value.endsWith("/")) {
+            return value.substring(0, value.length() - 1);
+        }
+        return value;
     }
 }

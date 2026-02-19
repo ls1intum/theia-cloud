@@ -16,6 +16,8 @@
  ********************************************************************************/
 package org.eclipse.theia.cloud.operator.util;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
@@ -68,7 +70,12 @@ public final class TheiaCloudIngressUtil {
         client.genericKubernetesResources(HTTP_ROUTE_CONTEXT).inNamespace(namespace)
                 .withName(route.getMetadata().getName())
                 .edit(resource -> {
-                    resource.getMetadata().getOwnerReferences().add(ownerReference);
+                    List<OwnerReference> ownerReferences = resource.getMetadata().getOwnerReferences();
+                    if (ownerReferences == null) {
+                        ownerReferences = new ArrayList<>();
+                        resource.getMetadata().setOwnerReferences(ownerReferences);
+                    }
+                    ownerReferences.add(ownerReference);
                     return resource;
                 });
     }

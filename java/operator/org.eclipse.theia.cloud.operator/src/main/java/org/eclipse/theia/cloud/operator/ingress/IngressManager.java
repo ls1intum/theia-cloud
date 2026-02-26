@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 
 import org.apache.logging.log4j.LogManager;
@@ -38,7 +39,8 @@ public class IngressManager {
     private static final Logger LOGGER = LogManager.getLogger(IngressManager.class);
     private static final int HTTP_CONFLICT = 409;
     private static final int ROUTE_EDIT_MAX_RETRIES = 5;
-    private static final long ROUTE_EDIT_RETRY_BACKOFF_MS = 100L;
+    private static final long ROUTE_EDIT_RETRY_BACKOFF_MS = 200L;
+    private static final long ROUTE_EDIT_RETRY_JITTER_MS = 100L;
 
     @Inject
     private TheiaCloudClient client;
@@ -378,7 +380,10 @@ public class IngressManager {
                         "HTTPRoute edit conflict for " + routeName + " (attempt "
                                 + attempt + "/" + ROUTE_EDIT_MAX_RETRIES + "). Retrying."));
                 try {
-                    Thread.sleep(ROUTE_EDIT_RETRY_BACKOFF_MS);
+                    long jitter = ThreadLocalRandom.current()
+                            .nextLong(-ROUTE_EDIT_RETRY_JITTER_MS, ROUTE_EDIT_RETRY_JITTER_MS + 1);
+                    long backoffMs = Math.max(0, ROUTE_EDIT_RETRY_BACKOFF_MS + jitter);
+                    Thread.sleep(backoffMs);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     throw e;

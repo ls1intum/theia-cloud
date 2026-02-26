@@ -64,7 +64,8 @@ fi
 
 exec java $JAVA_OPTS \
   -Dlog4j2.configurationFile=/log-config/log4j2.xml \
-  -jar ./defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar
+  -jar ./defaultoperator-1.2.0-SNAPSHOT-jar-with-dependencies.jar \
+  "$@"
 EOF_ENTRYPOINT
 
 # to get more debug information from the kubernetes client itself, add -Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG below

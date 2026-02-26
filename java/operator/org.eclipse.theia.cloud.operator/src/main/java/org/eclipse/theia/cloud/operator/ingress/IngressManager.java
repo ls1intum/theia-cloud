@@ -37,6 +37,12 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 public class IngressManager {
 
     private static final Logger LOGGER = LogManager.getLogger(IngressManager.class);
+    /**
+     * Envoy Gateway runtime expression for the current request path.
+     * This value is interpreted by Envoy; other Gateway API implementations may
+     * treat it as a plain literal string.
+     */
+    private static final String ENVOY_REQUEST_PATH_EXPRESSION = "%REQ(:PATH)%";
     private static final int HTTP_CONFLICT = 409;
     private static final int ROUTE_EDIT_MAX_RETRIES = 5;
     private static final long ROUTE_EDIT_RETRY_BACKOFF_MS = 200L;
@@ -250,6 +256,12 @@ public class IngressManager {
         return list;
     }
 
+    /**
+     * Creates the backend routing rule for a session path.
+     *
+     * The X-Forwarded-Uri header uses an Envoy Gateway runtime expression and
+     * therefore requires Envoy Gateway for correct behavior.
+     */
     private Map<String, Object> createRouteRule(String serviceName, int port, String path) {
         Map<String, Object> rule = new HashMap<>();
 
@@ -265,7 +277,7 @@ public class IngressManager {
 
         Map<String, Object> forwardedUriHeader = new HashMap<>();
         forwardedUriHeader.put("name", "X-Forwarded-Uri");
-        forwardedUriHeader.put("value", "%REQ(:PATH)%");
+        forwardedUriHeader.put("value", ENVOY_REQUEST_PATH_EXPRESSION);
         List<Map<String, Object>> setHeaders = new ArrayList<>();
         setHeaders.add(forwardedUriHeader);
 

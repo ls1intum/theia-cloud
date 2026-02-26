@@ -274,8 +274,8 @@ public class LazySessionHandler implements SessionHandler {
         ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_route_rule", "Add HTTPRoute rule");
         String host;
         try {
-            host = ingressManager.addRuleForLazySession(
-                    routeOpt.get(), serviceOpt.get(), session, appDef, correlationId);
+            host = ingressManager.addRuleForSession(
+                    routeOpt.get(), serviceOpt.get(), appDef, session, correlationId);
             ingressRuleSpan.setData("host", host);
             Tracing.finishSuccess(ingressRuleSpan);
         } catch (KubernetesClientException e) {
@@ -341,21 +341,19 @@ public class LazySessionHandler implements SessionHandler {
 
         // Remove HTTPRoute rules
         ISpan removeRulesSpan = Tracing.childSpan(span, "lazy.remove_route_rules", "Remove HTTPRoute rules");
-        boolean success = ingressManager.removeRulesForLazySession(
-                routeOpt.get(), session, appDef, correlationId);
-
-        if (!success) {
-            LOGGER.error(formatLogMessage(correlationId, "Failed to remove HTTPRoute rules for session"));
+        try {
+            ingressManager.removeRulesForSession(routeOpt.get(), appDef, session, correlationId);
+            Tracing.finishSuccess(removeRulesSpan);
+            LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up HTTPRoute rules for session"));
+            span.setTag("outcome", "success");
+            return true;
+        } catch (KubernetesClientException e) {
+            LOGGER.error(formatLogMessage(correlationId, "Failed to remove HTTPRoute rules for session"), e);
             removeRulesSpan.setTag("outcome", "failed");
-            Tracing.finish(removeRulesSpan, SpanStatus.INTERNAL_ERROR);
+            Tracing.finishError(removeRulesSpan, e);
             span.setTag("outcome", "remove_rules_failed");
             return false;
         }
-        Tracing.finishSuccess(removeRulesSpan);
-
-        LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up HTTPRoute rules for session"));
-        span.setTag("outcome", "success");
-        return true;
     }
 
     // ========== Helper Methods ==========

@@ -26,7 +26,11 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 
 /**
  * Centralized manager for HTTPRoute operations (Gateway API).
- * Handles adding/removing route rules for sessions.
+ *
+ * Caller intent:
+ * - find the route for an app definition
+ * - expose a session path via redirect + backend route rule
+ * - unexpose a session path during cleanup
  */
 @Singleton
 public class IngressManager {
@@ -46,255 +50,170 @@ public class IngressManager {
     private IngressPathProvider pathProvider;
 
     /**
-     * Specification for a route rule to be added.
-     */
-    public static class IngressRuleSpec {
-        private final String serviceName;
-        private final int port;
-        private final String path;
-        private final List<String> hosts;
-
-        private IngressRuleSpec(Builder builder) {
-            this.serviceName = builder.serviceName;
-            this.port = builder.port;
-            this.path = builder.path;
-            this.hosts = builder.hosts;
-        }
-
-        public static Builder builder() {
-            return new Builder();
-        }
-
-        public static class Builder {
-            private String serviceName;
-            private int port;
-            private String path;
-            private List<String> hosts = new ArrayList<>();
-
-            public Builder serviceName(String serviceName) {
-                this.serviceName = serviceName;
-                return this;
-            }
-
-            public Builder port(int port) {
-                this.port = port;
-                return this;
-            }
-
-            public Builder path(String path) {
-                this.path = path;
-                return this;
-            }
-
-            public Builder host(String host) {
-                this.hosts.add(host);
-                return this;
-            }
-
-            public Builder hosts(List<String> hosts) {
-                this.hosts.addAll(hosts);
-                return this;
-            }
-
-            public IngressRuleSpec build() {
-                return new IngressRuleSpec(this);
-            }
-        }
-    }
-
-    /**
      * Gets the HTTPRoute for an app definition.
      */
     public Optional<GenericKubernetesResource> getIngress(AppDefinition appDefinition, String correlationId) {
-        return K8sUtil.getExistingHttpRoute(
+        Optional<GenericKubernetesResource> route = K8sUtil.getExistingHttpRoute(
                 client.kubernetes(),
                 client.namespace(),
                 appDefinition.getMetadata().getName(),
                 appDefinition.getMetadata().getUid());
+        if (route.isEmpty()) {
+            LOGGER.debug(formatLogMessage(correlationId,
+                    "No HTTPRoute found for app definition " + appDefinition.getMetadata().getName()));
+        }
+        return route;
     }
 
     /**
-     * Adds a route rule for a session using eager start (prewarmed instance).
-     * 
+     * Exposes an eager session by adding/updating path rules in the shared HTTPRoute.
+     *
      * @return the full URL for the session
      */
-    public String addRuleForEagerSession(
+    public String addRuleForSession(
             GenericKubernetesResource route,
             Service service,
             AppDefinition appDefinition,
             int instance,
             String correlationId) {
 
-        String instancesHost = arguments.getInstancesHost();
         String path = pathProvider.getPath(appDefinition, instance);
-        int port = appDefinition.getSpec().getPort();
-
-        // Include hostname prefixes (e.g. *.webview.) for eager sessions too
-        List<String> hosts = new ArrayList<>();
-        hosts.add(instancesHost);
-        List<String> prefixes = appDefinition.getSpec().getIngressHostnamePrefixes();
-        if (prefixes != null) {
-            for (String prefix : prefixes) {
-                hosts.add(prefix + instancesHost);
-            }
-        }
-
-        addRule(route, IngressRuleSpec.builder()
-                .serviceName(service.getMetadata().getName())
-                .port(port)
-                .path(path)
-                .hosts(hosts)
-                .build(), correlationId);
-
-        return instancesHost + path + "/";
+        return upsertRulesForPath(route, service, appDefinition, path, correlationId);
     }
 
     /**
-     * Adds a route rule for a session using lazy start.
-     * Supports multiple hosts (for hostname prefixes).
-     * 
+     * Exposes a lazy session by adding/updating path rules in the shared HTTPRoute.
+     *
      * @return the full URL for the session
      */
-    public String addRuleForLazySession(
+    public String addRuleForSession(
             GenericKubernetesResource route,
             Service service,
-            Session session,
             AppDefinition appDefinition,
+            Session session,
             String correlationId) {
 
-        String instancesHost = arguments.getInstancesHost();
         String path = pathProvider.getPath(appDefinition, session);
-        int port = appDefinition.getSpec().getPort();
-
-        // Build list of all hosts
-        List<String> hosts = new ArrayList<>();
-        hosts.add(instancesHost);
-
-        List<String> prefixes = appDefinition.getSpec().getIngressHostnamePrefixes();
-        if (prefixes != null) {
-            for (String prefix : prefixes) {
-                hosts.add(prefix + instancesHost);
-            }
-        }
-
-        addRule(route, IngressRuleSpec.builder()
-                .serviceName(service.getMetadata().getName())
-                .port(port)
-                .path(path)
-                .hosts(hosts)
-                .build(), correlationId);
-
-        return instancesHost + path + "/";
+        return upsertRulesForPath(route, service, appDefinition, path, correlationId);
     }
 
     /**
-     * Adds HTTPRoute rules according to the specification.
+     * Removes rules for an eager session path from the shared HTTPRoute.
      */
-    public synchronized void addRule(GenericKubernetesResource route, IngressRuleSpec spec, String correlationId) {
-        try {
-            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
-                Map<String, Object> specMap = getSpec(routeToUpdate);
-
-                List<String> hostnames = getStringList(specMap, "hostnames");
-                for (String host : spec.hosts) {
-                    if (!hostnames.contains(host)) {
-                        hostnames.add(host);
-                    }
-                }
-
-                List<Map<String, Object>> rules = getRuleList(specMap);
-                rules.add(createRedirectRule(spec.path));
-                rules.add(createRouteRule(spec.serviceName, spec.port, spec.path));
-            }, correlationId);
-            LOGGER.info(formatLogMessage(correlationId,
-                    "Added HTTPRoute rule for path " + spec.path + " to " + route.getMetadata().getName()));
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to add HTTPRoute rule to " + route.getMetadata().getName()), e);
-            throw e;
-        }
-    }
-
-    /**
-     * Removes a route rule for an eager session.
-     */
-    public void removeRuleForEagerSession(
+    public void removeRulesForSession(
             GenericKubernetesResource route,
             AppDefinition appDefinition,
             int instance,
             String correlationId) {
 
         String path = pathProvider.getPath(appDefinition, instance);
-        removeRuleByPath(route, path, correlationId);
+        removeRulesForPath(route, path, correlationId);
     }
 
     /**
-     * Removes route rules for a lazy session (handles multiple hosts).
+     * Removes rules for a lazy session path from the shared HTTPRoute.
      */
-    public boolean removeRulesForLazySession(
+    public void removeRulesForSession(
             GenericKubernetesResource route,
-            Session session,
             AppDefinition appDefinition,
+            Session session,
             String correlationId) {
 
-        String instancesHost = arguments.getInstancesHost();
         String path = pathProvider.getPath(appDefinition, session);
-
-        List<String> hosts = new ArrayList<>();
-        hosts.add(instancesHost);
-
-        List<String> prefixes = appDefinition.getSpec().getIngressHostnamePrefixes();
-        if (prefixes != null) {
-            for (String prefix : prefixes) {
-                hosts.add(prefix + instancesHost);
-            }
-        }
-
-        return removeRulesByPathAndHosts(route, path, hosts, correlationId);
+        removeRulesForPath(route, path, correlationId);
     }
 
-    /**
-     * Removes HTTPRoute rule by path.
-     */
-    public synchronized void removeRuleByPath(GenericKubernetesResource route, String path, String correlationId) {
-        try {
-            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
-                Map<String, Object> specMap = getSpec(routeToUpdate);
-                List<Map<String, Object>> rules = getRuleList(specMap);
-                rules.removeIf(rule -> hasPathMatch(rule, path));
-            }, correlationId);
-            LOGGER.info(formatLogMessage(correlationId,
-                    "Removed HTTPRoute rule for path " + path + " from " + route.getMetadata().getName()));
-        } catch (KubernetesClientException e) {
-            LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to remove HTTPRoute rule from " + route.getMetadata().getName()), e);
-            throw e;
-        }
-    }
-
-    /**
-     * Removes HTTPRoute rules matching path and specific hosts.
-     */
-    public synchronized boolean removeRulesByPathAndHosts(
+    private String upsertRulesForPath(
             GenericKubernetesResource route,
+            Service service,
+            AppDefinition appDefinition,
             String path,
-            List<String> hosts,
             String correlationId) {
 
+        String routeName = route.getMetadata().getName();
+        String serviceName = service.getMetadata().getName();
+        int port = appDefinition.getSpec().getPort();
+        List<String> hosts = buildRouteHosts(appDefinition);
+
         try {
-            editRouteWithRetry(route.getMetadata().getName(), routeToUpdate -> {
+            editRouteWithRetry(routeName, routeToUpdate -> {
                 Map<String, Object> specMap = getSpec(routeToUpdate);
+                ensureHostnamesPresent(specMap, hosts);
+
                 List<Map<String, Object>> rules = getRuleList(specMap);
-                rules.removeIf(rule -> hasPathMatch(rule, path));
+                removeRulesMatchingPath(rules, path);
+
+                rules.add(createRedirectRule(path));
+                rules.add(createRouteRule(serviceName, port, path));
             }, correlationId);
+
             LOGGER.info(formatLogMessage(correlationId,
-                    "Removed HTTPRoute rules for path " + path + " from " + route.getMetadata().getName()));
-            return true;
+                    "Configured HTTPRoute " + routeName + " for path " + path
+                            + " and backend service " + serviceName));
+            return arguments.getInstancesHost() + ensureTrailingSlash(path);
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId,
-                    "Failed to remove HTTPRoute rules from " + route.getMetadata().getName()), e);
+                    "Failed to configure HTTPRoute " + routeName + " for path " + path), e);
             throw e;
         }
+    }
+
+    private void removeRulesForPath(GenericKubernetesResource route, String path, String correlationId) {
+        String routeName = route.getMetadata().getName();
+
+        try {
+            int[] removedRuleCount = new int[] { 0 };
+            editRouteWithRetry(routeName, routeToUpdate -> {
+                Map<String, Object> specMap = getSpec(routeToUpdate);
+                List<Map<String, Object>> rules = getRuleList(specMap);
+                removedRuleCount[0] = removeRulesMatchingPath(rules, path);
+                // hostnames are route-wide and shared across multiple session paths;
+                // removing rules for one path must not delete shared hostnames.
+            }, correlationId);
+
+            if (removedRuleCount[0] > 0) {
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Removed " + removedRuleCount[0] + " HTTPRoute rule(s) for path " + path + " from "
+                                + routeName));
+            } else {
+                LOGGER.debug(formatLogMessage(correlationId,
+                        "No HTTPRoute rules found for path " + path + " in " + routeName));
+            }
+        } catch (KubernetesClientException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Failed to remove HTTPRoute rules for path " + path + " from " + routeName), e);
+            throw e;
+        }
+    }
+
+    private List<String> buildRouteHosts(AppDefinition appDefinition) {
+        String instancesHost = arguments.getInstancesHost();
+        List<String> hosts = new ArrayList<>();
+        hosts.add(instancesHost);
+
+        List<String> prefixes = appDefinition.getSpec().getIngressHostnamePrefixes();
+        if (prefixes != null) {
+            for (String prefix : prefixes) {
+                hosts.add(prefix + instancesHost);
+            }
+        }
+
+        return hosts;
+    }
+
+    private void ensureHostnamesPresent(Map<String, Object> spec, List<String> hosts) {
+        List<String> hostnames = getStringList(spec, "hostnames");
+        for (String host : hosts) {
+            if (!hostnames.contains(host)) {
+                hostnames.add(host);
+            }
+        }
+    }
+
+    private int removeRulesMatchingPath(List<Map<String, Object>> rules, String path) {
+        int initialSize = rules.size();
+        rules.removeIf(rule -> hasPathMatch(rule, path));
+        return initialSize - rules.size();
     }
 
     @SuppressWarnings("unchecked")

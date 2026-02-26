@@ -239,7 +239,7 @@ public class EagerSessionHandler implements SessionHandler {
             ISpan ingressRuleSpan = Tracing.childSpan(span, "eager.add_route_rule", "Add HTTPRoute rule");
             String host;
             try {
-                host = ingressManager.addRuleForEagerSession(route, instance.getExternalService(), appDef,
+                host = ingressManager.addRuleForSession(route, instance.getExternalService(), appDef,
                         instance.getInstanceId(), correlationId);
                 ingressRuleSpan.setData("host", host);
                 Tracing.finishSuccess(ingressRuleSpan);
@@ -326,7 +326,7 @@ public class EagerSessionHandler implements SessionHandler {
             ISpan removeIngressSpan = Tracing.childSpan(span, "eager.remove_route_rule", "Remove HTTPRoute rule");
             removeIngressSpan.setData("instance_id", instanceId);
             try {
-                ingressManager.removeRuleForEagerSession(routeOpt.get(), appDef, instanceId, correlationId);
+                ingressManager.removeRulesForSession(routeOpt.get(), appDef, instanceId, correlationId);
                 Tracing.finishSuccess(removeIngressSpan);
             } catch (KubernetesClientException e) {
                 LOGGER.error(formatLogMessage(correlationId, "Error while removing HTTPRoute rule"), e);

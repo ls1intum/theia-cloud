@@ -79,7 +79,8 @@ exec java $JAVA_OPTS \
   -Dquarkus.oidc.auth-server-url="${KEYCLOAK_SERVERURL}" \
   -Dquarkus.oidc.client-id="${KEYCLOAK_CLIENTID}" \
   -Dquarkus.oidc.credentials.secret="${KEYCLOAK_CLIENTSECRET}" \
-  -jar ./service-1.2.0-SNAPSHOT-runner.jar
+  -jar ./service-1.2.0-SNAPSHOT-runner.jar \
+  "$@"
 EOF_ENTRYPOINT
 
 ENTRYPOINT ["/entrypoint.sh"]

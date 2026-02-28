@@ -78,15 +78,20 @@ public record LanguageServerConfig(
         }
         return new LanguageServerConfig(
             this.languageKey,
-            options.getOrDefault(OPTION_LS_IMAGE, this.image),
+            override(options, OPTION_LS_IMAGE, this.image),
             this.containerPort,
             this.hostEnvVar,
             this.portEnvVar,
-            options.getOrDefault(OPTION_LS_CPU_LIMIT, this.cpuLimit),
-            options.getOrDefault(OPTION_LS_MEMORY_LIMIT, this.memoryLimit),
-            options.getOrDefault(OPTION_LS_CPU_REQUEST, this.cpuRequest),
-            options.getOrDefault(OPTION_LS_MEMORY_REQUEST, this.memoryRequest)
+            override(options, OPTION_LS_CPU_LIMIT, this.cpuLimit),
+            override(options, OPTION_LS_MEMORY_LIMIT, this.memoryLimit),
+            override(options, OPTION_LS_CPU_REQUEST, this.cpuRequest),
+            override(options, OPTION_LS_MEMORY_REQUEST, this.memoryRequest)
         );
+    }
+
+    private static String override(Map<String, String> options, String key, String defaultValue) {
+        String value = options.get(key);
+        return (value != null && !value.isBlank()) ? value : defaultValue;
     }
     
     /**

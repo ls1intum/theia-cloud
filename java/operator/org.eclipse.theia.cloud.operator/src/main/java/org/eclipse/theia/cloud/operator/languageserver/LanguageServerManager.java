@@ -89,6 +89,20 @@ public class LanguageServerManager {
             if (deployment.isEmpty()) {
                 depSpan.setTag("outcome", "failure");
                 Tracing.finish(depSpan, SpanStatus.INTERNAL_ERROR);
+
+                ISpan rollbackSpan = Tracing.childSpan(span, "ls.service.rollback", "Rollback LS service");
+                try {
+                    factory.deleteResources(session, correlationId);
+                    LOGGER.warn(formatLogMessage(correlationId,
+                        "[LS] Rolled back orphaned service after deployment failure: "
+                        + service.get().getMetadata().getName()));
+                    Tracing.finishSuccess(rollbackSpan);
+                } catch (Exception rollbackEx) {
+                    LOGGER.error(formatLogMessage(correlationId,
+                        "[LS] Failed to roll back orphaned service after deployment failure"), rollbackEx);
+                    Tracing.finishError(rollbackSpan, rollbackEx);
+                }
+
                 Tracing.finishError(span, new RuntimeException("Failed to create LS deployment"));
                 return false;
             }

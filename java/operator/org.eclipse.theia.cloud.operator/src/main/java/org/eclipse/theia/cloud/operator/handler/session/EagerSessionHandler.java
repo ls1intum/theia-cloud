@@ -229,11 +229,18 @@ public class EagerSessionHandler implements SessionHandler {
             }
             Tracing.finishSuccess(setupSpan);
 
-            // Create language server
-            languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId);
+            // Language server setup is best-effort: the session remains usable even if LS creation fails.
+            if (!languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId)) {
+                LOGGER.warn(formatLogMessage(correlationId,
+                    "Language server creation failed for session " + session.getMetadata().getName()
+                    + "; session will continue without language server support."));
+            }
 
-            // Patch environment variables into the existing Theia deployment
-            languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId);
+            if (!languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
+                LOGGER.warn(formatLogMessage(correlationId,
+                    "Failed to patch language server env vars into deployment " + instance.getDeploymentName()
+                    + "; session will continue without language server env vars."));
+            }
 
             // Schedule async credential injection via data bridge (tracked in separate transaction)
             if (DataBridgeUtil.isDataBridgeEnabled(appDef.getSpec())) {

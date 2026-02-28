@@ -91,6 +91,12 @@ public class LanguageServerRegistry {
 
     private String detectLanguageFromImage(String image) {
         String lowerImage = image.toLowerCase();
+        if (lowerImage.contains("javascript") || lowerImage.contains("node") || lowerImage.contains("-js-")) {
+            return "javascript";
+        }
+        if (lowerImage.contains("typescript") || lowerImage.contains("tsserver")) {
+            return "typescript";
+        }
         if (lowerImage.contains("java") || lowerImage.contains("jdt")) {
             return "java";
         }
@@ -99,9 +105,6 @@ public class LanguageServerRegistry {
         }
         if (lowerImage.contains("python") || lowerImage.contains("pyright") || lowerImage.contains("pylsp")) {
             return "python";
-        }
-        if (lowerImage.contains("typescript") || lowerImage.contains("tsserver")) {
-            return "typescript";
         }
         if (lowerImage.contains("clangd") || lowerImage.contains("ccls")) {
             return "cpp";

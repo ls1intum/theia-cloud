@@ -277,8 +277,12 @@ public class LazySessionHandler implements SessionHandler {
                 correlationId);
         Tracing.finishSuccess(deploymentSpan);
 
-        // Create language server
-        languageServerManager.createLanguageServer(session, appDef, storageName, correlationId);
+        // Language server setup is best-effort: the session remains usable even if LS creation fails.
+        if (!languageServerManager.createLanguageServer(session, appDef, storageName, correlationId)) {
+            LOGGER.warn(formatLogMessage(correlationId,
+                "Language server creation failed for session " + session.getMetadata().getName()
+                + "; session will continue without language server support."));
+        }
 
         // Add ingress rule
         ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_ingress_rule", "Add ingress rule");

@@ -13,11 +13,13 @@ import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessag
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -37,6 +39,7 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaimVolumeSource;
+import io.fabric8.kubernetes.api.model.PodSpec;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
@@ -218,49 +221,18 @@ public class LanguageServerResourceFactory {
             "[LS] Injecting env vars for language " + config.languageKey() + " -> " + serviceName));
 
         try {
-            String containerName = appDef.getSpec().getName();
-            Optional<Integer> containerIdx = findContainerIndex(theiaDeployment, containerName);
+            PodSpec podSpec = theiaDeployment.getSpec().getTemplate().getSpec();
+            Container container = TheiaCloudPersistentVolumeUtil.getTheiaContainer(podSpec, appDef.getSpec());
 
-            if (containerIdx.isEmpty()) {
+            if (container == null) {
                 LOGGER.error(formatLogMessage(correlationId, 
-                    "[LS] Could not find container " + containerName + " in deployment"));
+                    "[LS] Could not find Theia container in deployment"));
                 span.setTag("outcome", "container_not_found");
                 Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return;
             }
 
-            Container container = theiaDeployment.getSpec().getTemplate().getSpec()
-                .getContainers().get(containerIdx.get());
-            List<EnvVar> envVars = container.getEnv();
-
-            envVars.removeIf(e -> 
-                e.getName().equals(config.hostEnvVar()) ||
-                e.getName().equals(config.portEnvVar()) ||
-                e.getName().equals("LS_HOST") ||
-                e.getName().equals("LS_PORT") ||
-                e.getName().equals("LS_LANGUAGE"));
-
-            envVars.add(new EnvVarBuilder()
-                .withName(config.hostEnvVar())
-                .withValue(serviceName)
-                .build());
-            envVars.add(new EnvVarBuilder()
-                .withName(config.portEnvVar())
-                .withValue(String.valueOf(config.containerPort()))
-                .build());
-
-            envVars.add(new EnvVarBuilder()
-                .withName("LS_HOST")
-                .withValue(serviceName)
-                .build());
-            envVars.add(new EnvVarBuilder()
-                .withName("LS_PORT")
-                .withValue(String.valueOf(config.containerPort()))
-                .build());
-            envVars.add(new EnvVarBuilder()
-                .withName("LS_LANGUAGE")
-                .withValue(config.languageKey())
-                .build());
+            applyLanguageServerEnvVars(container, config, serviceName);
 
             Tracing.finishSuccess(span);
             LOGGER.info(formatLogMessage(correlationId, 
@@ -289,9 +261,9 @@ public class LanguageServerResourceFactory {
             LOGGER.info(formatLogMessage(correlationId, "[LS] Deleted resources: " + resourceName));
 
         } catch (Exception e) {
-            LOGGER.debug(formatLogMessage(correlationId, 
-                "[LS] Resources already deleted or not found: " + resourceName));
-            Tracing.finishSuccess(span);
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error deleting resources: " + resourceName), e);
+            Tracing.finishError(span, e);
         }
     }
 
@@ -309,56 +281,36 @@ public class LanguageServerResourceFactory {
         span.setData("deployment", deploymentName);
         span.setData("service_name", serviceName);
 
+        // Patching env vars into an existing Deployment triggers a Kubernetes pod restart.
+        // The Lazy session path avoids this by injecting env vars at deployment creation time.
         LOGGER.info(formatLogMessage(correlationId,
             "[LS] Patching env vars into deployment " + deploymentName + " for language " + config.languageKey()));
 
         try {
+            AtomicBoolean patchApplied = new AtomicBoolean(false);
+
             client.kubernetes().apps().deployments()
                 .withName(deploymentName)
                 .edit(deployment -> {
-                    String containerName = appDef.getSpec().getName();
-                    Optional<Integer> containerIdx = findContainerIndex(deployment, containerName);
+                    PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
+                    Container container = TheiaCloudPersistentVolumeUtil.getTheiaContainer(podSpec, appDef.getSpec());
 
-                    if (containerIdx.isEmpty()) {
+                    if (container == null) {
                         LOGGER.error(formatLogMessage(correlationId,
-                            "[LS] Could not find container " + containerName + " in deployment " + deploymentName));
+                            "[LS] Could not find Theia container in deployment " + deploymentName));
                         return deployment;
                     }
 
-                    Container container = deployment.getSpec().getTemplate().getSpec()
-                        .getContainers().get(containerIdx.get());
-                    List<EnvVar> envVars = container.getEnv();
-
-                    envVars.removeIf(e ->
-                        e.getName().equals(config.hostEnvVar()) ||
-                        e.getName().equals(config.portEnvVar()) ||
-                        e.getName().equals("LS_HOST") ||
-                        e.getName().equals("LS_PORT") ||
-                        e.getName().equals("LS_LANGUAGE"));
-
-                    envVars.add(new EnvVarBuilder()
-                        .withName(config.hostEnvVar())
-                        .withValue(serviceName)
-                        .build());
-                    envVars.add(new EnvVarBuilder()
-                        .withName(config.portEnvVar())
-                        .withValue(String.valueOf(config.containerPort()))
-                        .build());
-                    envVars.add(new EnvVarBuilder()
-                        .withName("LS_HOST")
-                        .withValue(serviceName)
-                        .build());
-                    envVars.add(new EnvVarBuilder()
-                        .withName("LS_PORT")
-                        .withValue(String.valueOf(config.containerPort()))
-                        .build());
-                    envVars.add(new EnvVarBuilder()
-                        .withName("LS_LANGUAGE")
-                        .withValue(config.languageKey())
-                        .build());
-
+                    applyLanguageServerEnvVars(container, config, serviceName);
+                    patchApplied.set(true);
                     return deployment;
                 });
+
+            if (!patchApplied.get()) {
+                span.setTag("outcome", "container_not_found");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
+                return false;
+            }
 
             Tracing.finishSuccess(span);
             LOGGER.info(formatLogMessage(correlationId,
@@ -373,39 +325,82 @@ public class LanguageServerResourceFactory {
         }
     }
 
+    private void applyLanguageServerEnvVars(Container container, LanguageServerConfig config, String serviceName) {
+        List<EnvVar> envVars = container.getEnv();
+        if (envVars == null) {
+            envVars = new ArrayList<>();
+            container.setEnv(envVars);
+        }
+
+        envVars.removeIf(e ->
+            e.getName().equals(config.hostEnvVar()) ||
+            e.getName().equals(config.portEnvVar()) ||
+            e.getName().equals("LS_HOST") ||
+            e.getName().equals("LS_PORT") ||
+            e.getName().equals("LS_LANGUAGE"));
+
+        envVars.add(new EnvVarBuilder()
+            .withName(config.hostEnvVar())
+            .withValue(serviceName)
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName(config.portEnvVar())
+            .withValue(String.valueOf(config.containerPort()))
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_HOST")
+            .withValue(serviceName)
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_PORT")
+            .withValue(String.valueOf(config.containerPort()))
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_LANGUAGE")
+            .withValue(config.languageKey())
+            .build());
+    }
+
     private void addVolumeClaimToDeployment(Deployment deployment, String pvcName, AppDefinitionSpec appDefSpec) {
-        var podSpec = deployment.getSpec().getTemplate().getSpec();
+        PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
 
         Volume volume = new Volume();
         volume.setName("workspace-data");
         PersistentVolumeClaimVolumeSource pvcSource = new PersistentVolumeClaimVolumeSource();
         pvcSource.setClaimName(pvcName);
         volume.setPersistentVolumeClaim(pvcSource);
-        podSpec.getVolumes().add(volume);
+
+        List<Volume> volumes = podSpec.getVolumes();
+        if (volumes == null) {
+            volumes = new ArrayList<>();
+            podSpec.setVolumes(volumes);
+        }
+        volumes.add(volume);
 
         Container lsContainer = podSpec.getContainers().get(0);
-        
+
         String mountPath = TheiaCloudPersistentVolumeUtil.getMountPath(appDefSpec);
-        
+
         VolumeMount volumeMount = new VolumeMount();
         volumeMount.setName("workspace-data");
         volumeMount.setMountPath(mountPath);
-        lsContainer.getVolumeMounts().add(volumeMount);
-        
-        lsContainer.getEnv().add(new EnvVarBuilder()
+
+        List<VolumeMount> volumeMounts = lsContainer.getVolumeMounts();
+        if (volumeMounts == null) {
+            volumeMounts = new ArrayList<>();
+            lsContainer.setVolumeMounts(volumeMounts);
+        }
+        volumeMounts.add(volumeMount);
+
+        List<EnvVar> envVars = lsContainer.getEnv();
+        if (envVars == null) {
+            envVars = new ArrayList<>();
+            lsContainer.setEnv(envVars);
+        }
+        envVars.add(new EnvVarBuilder()
             .withName("WORKSPACE_PATH")
             .withValue(mountPath)
             .build());
-    }
-
-    private Optional<Integer> findContainerIndex(Deployment deployment, String containerName) {
-        List<Container> containers = deployment.getSpec().getTemplate().getSpec().getContainers();
-        for (int i = 0; i < containers.size(); i++) {
-            if (containers.get(i).getName().equals(containerName)) {
-                return Optional.of(i);
-            }
-        }
-        return Optional.empty();
     }
 
     public static String getDeploymentName(Session session) {

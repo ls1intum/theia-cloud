@@ -140,6 +140,11 @@ public class LanguageServerResourceFactory {
                 "[LS] Error creating deployment " + deploymentName), e);
             Tracing.finishError(span, e);
             return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Unexpected error creating deployment " + deploymentName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
         }
     }
 
@@ -199,6 +204,11 @@ public class LanguageServerResourceFactory {
         } catch (IOException | URISyntaxException e) {
             LOGGER.error(formatLogMessage(correlationId, 
                 "[LS] Error creating service " + serviceName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Unexpected error creating service " + serviceName), e);
             Tracing.finishError(span, e);
             return Optional.empty();
         }

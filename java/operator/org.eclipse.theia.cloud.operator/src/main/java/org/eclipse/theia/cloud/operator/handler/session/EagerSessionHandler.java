@@ -230,13 +230,15 @@ public class EagerSessionHandler implements SessionHandler {
             Tracing.finishSuccess(setupSpan);
 
             // Language server setup is best-effort: the session remains usable even if LS creation fails.
-            if (!languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId)) {
+            boolean lsCreated = languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId);
+            if (!lsCreated) {
                 LOGGER.warn(formatLogMessage(correlationId,
                     "Language server creation failed for session " + session.getMetadata().getName()
                     + "; session will continue without language server support."));
             }
 
-            if (!languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
+            // Only patch env vars when LS was successfully created; no point restarting Theia for a non-existent LS.
+            if (lsCreated && !languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
                 LOGGER.warn(formatLogMessage(correlationId,
                     "Failed to patch language server env vars into deployment " + instance.getDeploymentName()
                     + "; session will continue without language server env vars."));

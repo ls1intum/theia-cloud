@@ -36,13 +36,13 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Service;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteList;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
-import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import io.fabric8.kubernetes.client.utils.Serialization;
 
 public final class K8sUtil {
@@ -54,14 +54,6 @@ public final class K8sUtil {
     private static final String SERVICE = "Service";
     private static final String INGRESS = "Ingress";
     private static final String HTTP_ROUTE = "HTTPRoute";
-
-    private static final ResourceDefinitionContext HTTP_ROUTE_CONTEXT = new ResourceDefinitionContext.Builder()
-            .withGroup("gateway.networking.k8s.io")
-            .withVersion("v1")
-            .withPlural("httproutes")
-            .withKind("HTTPRoute")
-            .withNamespaced(true)
-            .build();
 
     private K8sUtil() {
     }
@@ -80,17 +72,17 @@ public final class K8sUtil {
                         .findAny();
     }
 
-    public static Optional<GenericKubernetesResource> getExistingHttpRoute(NamespacedKubernetesClient client,
+    public static Optional<HTTPRoute> getExistingHttpRoute(NamespacedKubernetesClient client,
             String namespace, String routeName) {
-        return client.genericKubernetesResources(HTTP_ROUTE_CONTEXT).inNamespace(namespace).list().getItems().stream()//
+        return client.resources(HTTPRoute.class, HTTPRouteList.class).inNamespace(namespace).list().getItems().stream()//
                 .filter(route -> routeName.equals(route.getMetadata().getName()))//
                 .findAny();
     }
 
-    public static Optional<GenericKubernetesResource> getExistingHttpRoute(NamespacedKubernetesClient client,
+    public static Optional<HTTPRoute> getExistingHttpRoute(NamespacedKubernetesClient client,
             String namespace, String ownerName, String ownerUid) {
         return getExistingTypesStream(client, namespace, ownerName, ownerUid,
-                client.genericKubernetesResources(HTTP_ROUTE_CONTEXT).inNamespace(namespace).list().getItems())//
+                client.resources(HTTPRoute.class, HTTPRouteList.class).inNamespace(namespace).list().getItems())//
                         .findAny();
     }
 

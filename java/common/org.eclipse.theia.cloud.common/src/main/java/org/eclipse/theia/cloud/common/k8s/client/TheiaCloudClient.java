@@ -28,8 +28,8 @@ import io.fabric8.kubernetes.api.model.PersistentVolumeClaimList;
 import io.fabric8.kubernetes.api.model.PersistentVolumeList;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceList;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResourceList;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteList;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressList;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -37,7 +37,6 @@ import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.kubernetes.client.utils.KubernetesResourceUtil;
-import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 
 public interface TheiaCloudClient extends NamespacedKubernetesClient {
     @Override
@@ -65,15 +64,8 @@ public interface TheiaCloudClient extends NamespacedKubernetesClient {
         return client(kubernetes().network().v1().ingresses(), Ingress.class);
     }
 
-    default ResourceClient<GenericKubernetesResource, GenericKubernetesResourceList> httpRoutes() {
-        ResourceDefinitionContext context = new ResourceDefinitionContext.Builder()
-                .withGroup("gateway.networking.k8s.io")
-                .withVersion("v1")
-                .withPlural("httproutes")
-                .withKind("HTTPRoute")
-                .withNamespaced(true)
-                .build();
-        return client(kubernetes().genericKubernetesResources(context), GenericKubernetesResource.class);
+    default ResourceClient<HTTPRoute, HTTPRouteList> httpRoutes() {
+        return client(HTTPRoute.class, HTTPRouteList.class);
     }
 
     @SuppressWarnings("unchecked")

@@ -41,7 +41,7 @@ import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool.ReservationRe
 
 import com.google.inject.Inject;
 
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.sentry.ISpan;
 import io.sentry.Sentry;
@@ -168,7 +168,7 @@ public class EagerSessionHandler implements SessionHandler {
 
             // Find HTTPRoute
             ISpan ingressSpan = Tracing.childSpan(span, "eager.find_route", "Find HTTPRoute");
-            Optional<GenericKubernetesResource> routeOpt = ingressManager.getIngress(appDef, correlationId);
+            Optional<HTTPRoute> routeOpt = ingressManager.getIngress(appDef, correlationId);
             if (routeOpt.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No HTTPRoute for app definition " + appDefinitionID + " found."));
@@ -179,7 +179,7 @@ public class EagerSessionHandler implements SessionHandler {
                 Tracing.finish(span, SpanStatus.NOT_FOUND);
                 return EagerSessionAddedOutcome.ERROR;
             }
-            GenericKubernetesResource route = routeOpt.get();
+            HTTPRoute route = routeOpt.get();
             Tracing.finishSuccess(ingressSpan);
 
             // Reserve an instance from the pool
@@ -298,7 +298,7 @@ public class EagerSessionHandler implements SessionHandler {
 
             // Find HTTPRoute
             ISpan ingressSpan = Tracing.childSpan(span, "eager.find_route", "Find HTTPRoute");
-            Optional<GenericKubernetesResource> routeOpt = ingressManager.getIngress(appDef, correlationId);
+            Optional<HTTPRoute> routeOpt = ingressManager.getIngress(appDef, correlationId);
             if (routeOpt.isEmpty()) {
                 LOGGER.error(formatLogMessage(correlationId,
                         "No HTTPRoute for app definition " + appDefinitionID + " found."));

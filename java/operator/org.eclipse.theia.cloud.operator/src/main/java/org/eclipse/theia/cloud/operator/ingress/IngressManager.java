@@ -3,9 +3,7 @@ package org.eclipse.theia.cloud.operator.ingress;
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
@@ -21,8 +19,26 @@ import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPBackendRef;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPBackendRefBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPHeader;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPHeaderBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPHeaderFilterBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPPathMatch;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPPathMatchBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPPathModifierBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRequestRedirectFilterBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteFilter;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteFilterBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteMatch;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteMatchBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteRule;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteRuleBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteSpec;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteSpecBuilder;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPURLRewriteFilterBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 
 /**
@@ -60,8 +76,8 @@ public class IngressManager {
     /**
      * Gets the HTTPRoute for an app definition.
      */
-    public Optional<GenericKubernetesResource> getIngress(AppDefinition appDefinition, String correlationId) {
-        Optional<GenericKubernetesResource> route = K8sUtil.getExistingHttpRoute(
+    public Optional<HTTPRoute> getIngress(AppDefinition appDefinition, String correlationId) {
+        Optional<HTTPRoute> route = K8sUtil.getExistingHttpRoute(
                 client.kubernetes(),
                 client.namespace(),
                 appDefinition.getMetadata().getName(),
@@ -79,7 +95,7 @@ public class IngressManager {
      * @return the full URL for the session
      */
     public String addRuleForSession(
-            GenericKubernetesResource route,
+            HTTPRoute route,
             Service service,
             AppDefinition appDefinition,
             int instance,
@@ -95,7 +111,7 @@ public class IngressManager {
      * @return the full URL for the session
      */
     public String addRuleForSession(
-            GenericKubernetesResource route,
+            HTTPRoute route,
             Service service,
             AppDefinition appDefinition,
             Session session,
@@ -109,7 +125,7 @@ public class IngressManager {
      * Removes rules for an eager session path from the shared HTTPRoute.
      */
     public void removeRulesForSession(
-            GenericKubernetesResource route,
+            HTTPRoute route,
             AppDefinition appDefinition,
             int instance,
             String correlationId) {
@@ -122,7 +138,7 @@ public class IngressManager {
      * Removes rules for a lazy session path from the shared HTTPRoute.
      */
     public void removeRulesForSession(
-            GenericKubernetesResource route,
+            HTTPRoute route,
             AppDefinition appDefinition,
             Session session,
             String correlationId) {
@@ -132,7 +148,7 @@ public class IngressManager {
     }
 
     private String upsertRulesForPath(
-            GenericKubernetesResource route,
+            HTTPRoute route,
             Service service,
             AppDefinition appDefinition,
             String path,
@@ -145,10 +161,10 @@ public class IngressManager {
 
         try {
             editRouteWithRetry(routeName, routeToUpdate -> {
-                Map<String, Object> specMap = getSpec(routeToUpdate);
-                ensureHostnamesPresent(specMap, hosts);
+                HTTPRouteSpec spec = getOrCreateSpec(routeToUpdate);
+                ensureHostnamesPresent(spec, hosts);
 
-                List<Map<String, Object>> rules = getRuleList(specMap);
+                List<HTTPRouteRule> rules = getOrCreateRules(spec);
                 removeRulesMatchingPath(rules, path);
 
                 rules.add(createRedirectRule(path));
@@ -166,14 +182,14 @@ public class IngressManager {
         }
     }
 
-    private void removeRulesForPath(GenericKubernetesResource route, String path, String correlationId) {
+    private void removeRulesForPath(HTTPRoute route, String path, String correlationId) {
         String routeName = route.getMetadata().getName();
 
         try {
             int[] removedRuleCount = new int[] { 0 };
             editRouteWithRetry(routeName, routeToUpdate -> {
-                Map<String, Object> specMap = getSpec(routeToUpdate);
-                List<Map<String, Object>> rules = getRuleList(specMap);
+                HTTPRouteSpec spec = getOrCreateSpec(routeToUpdate);
+                List<HTTPRouteRule> rules = getOrCreateRules(spec);
                 removedRuleCount[0] = removeRulesMatchingPath(rules, path);
                 // hostnames are route-wide and shared across multiple session paths;
                 // removing rules for one path must not delete shared hostnames.
@@ -209,8 +225,12 @@ public class IngressManager {
         return hosts;
     }
 
-    private void ensureHostnamesPresent(Map<String, Object> spec, List<String> hosts) {
-        List<String> hostnames = getStringList(spec, "hostnames");
+    private void ensureHostnamesPresent(HTTPRouteSpec spec, List<String> hosts) {
+        List<String> hostnames = spec.getHostnames();
+        if (hostnames == null) {
+            hostnames = new ArrayList<>();
+            spec.setHostnames(hostnames);
+        }
         for (String host : hosts) {
             if (!hostnames.contains(host)) {
                 hostnames.add(host);
@@ -218,42 +238,28 @@ public class IngressManager {
         }
     }
 
-    private int removeRulesMatchingPath(List<Map<String, Object>> rules, String path) {
+    private int removeRulesMatchingPath(List<HTTPRouteRule> rules, String path) {
         int initialSize = rules.size();
         rules.removeIf(rule -> hasPathMatch(rule, path));
         return initialSize - rules.size();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> getSpec(GenericKubernetesResource route) {
-        Map<String, Object> additional = route.getAdditionalProperties();
-        if (additional == null) {
-            additional = new HashMap<>();
-            route.setAdditionalProperties(additional);
+    private HTTPRouteSpec getOrCreateSpec(HTTPRoute route) {
+        HTTPRouteSpec spec = route.getSpec();
+        if (spec == null) {
+            spec = new HTTPRouteSpecBuilder().build();
+            route.setSpec(spec);
         }
-        return (Map<String, Object>) additional.computeIfAbsent("spec", key -> new HashMap<>());
+        return spec;
     }
 
-    @SuppressWarnings("unchecked")
-    private List<String> getStringList(Map<String, Object> spec, String key) {
-        Object existing = spec.get(key);
-        if (existing instanceof List) {
-            return (List<String>) existing;
+    private List<HTTPRouteRule> getOrCreateRules(HTTPRouteSpec spec) {
+        List<HTTPRouteRule> rules = spec.getRules();
+        if (rules == null) {
+            rules = new ArrayList<>();
+            spec.setRules(rules);
         }
-        List<String> list = new ArrayList<>();
-        spec.put(key, list);
-        return list;
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> getRuleList(Map<String, Object> spec) {
-        Object existing = spec.get("rules");
-        if (existing instanceof List) {
-            return (List<Map<String, Object>>) existing;
-        }
-        List<Map<String, Object>> list = new ArrayList<>();
-        spec.put("rules", list);
-        return list;
+        return rules;
     }
 
     /**
@@ -262,124 +268,104 @@ public class IngressManager {
      * The X-Forwarded-Uri header uses an Envoy Gateway runtime expression and
      * therefore requires Envoy Gateway for correct behavior.
      */
-    private Map<String, Object> createRouteRule(String serviceName, int port, String path) {
-        Map<String, Object> rule = new HashMap<>();
+    private HTTPRouteRule createRouteRule(String serviceName, int port, String path) {
+        HTTPRouteMatch pathPrefixMatch = new HTTPRouteMatchBuilder()
+                .withPath(new HTTPPathMatchBuilder()
+                        .withType("PathPrefix")
+                        .withValue(ensureTrailingSlash(path))
+                        .build())
+                .build();
 
-        Map<String, Object> match = new HashMap<>();
-        Map<String, Object> matchPath = new HashMap<>();
-        matchPath.put("type", "PathPrefix");
-        matchPath.put("value", ensureTrailingSlash(path));
-        match.put("path", matchPath);
+        HTTPHeader forwardedUriHeader = new HTTPHeaderBuilder()
+                .withName("X-Forwarded-Uri")
+                .withValue(ENVOY_REQUEST_PATH_EXPRESSION)
+                .build();
 
-        List<Map<String, Object>> matches = new ArrayList<>();
-        matches.add(match);
-        rule.put("matches", matches);
+        HTTPRouteFilter requestHeaderFilter = new HTTPRouteFilterBuilder()
+                .withType("RequestHeaderModifier")
+                .withRequestHeaderModifier(new HTTPHeaderFilterBuilder()
+                        .withSet(forwardedUriHeader)
+                        .build())
+                .build();
 
-        Map<String, Object> forwardedUriHeader = new HashMap<>();
-        forwardedUriHeader.put("name", "X-Forwarded-Uri");
-        forwardedUriHeader.put("value", ENVOY_REQUEST_PATH_EXPRESSION);
-        List<Map<String, Object>> setHeaders = new ArrayList<>();
-        setHeaders.add(forwardedUriHeader);
+        HTTPRouteFilter urlRewriteFilter = new HTTPRouteFilterBuilder()
+                .withType("URLRewrite")
+                .withUrlRewrite(new HTTPURLRewriteFilterBuilder()
+                        .withPath(new HTTPPathModifierBuilder()
+                                .withType("ReplacePrefixMatch")
+                                .withReplacePrefixMatch("/")
+                                .build())
+                        .build())
+                .build();
 
-        Map<String, Object> requestHeaderModifier = new HashMap<>();
-        requestHeaderModifier.put("set", setHeaders);
+        HTTPBackendRef backendRef = new HTTPBackendRefBuilder()
+                .withName(serviceName)
+                .withPort(port)
+                .build();
 
-        Map<String, Object> requestHeaderFilter = new HashMap<>();
-        requestHeaderFilter.put("type", "RequestHeaderModifier");
-        requestHeaderFilter.put("requestHeaderModifier", requestHeaderModifier);
-
-        Map<String, Object> rewritePath = new HashMap<>();
-        rewritePath.put("type", "ReplacePrefixMatch");
-        rewritePath.put("replacePrefixMatch", "/");
-
-        Map<String, Object> urlRewrite = new HashMap<>();
-        urlRewrite.put("path", rewritePath);
-
-        Map<String, Object> filter = new HashMap<>();
-        filter.put("type", "URLRewrite");
-        filter.put("urlRewrite", urlRewrite);
-
-        List<Map<String, Object>> filters = new ArrayList<>();
-        filters.add(requestHeaderFilter);
-        filters.add(filter);
-        rule.put("filters", filters);
-
-        Map<String, Object> backendRef = new HashMap<>();
-        backendRef.put("name", serviceName);
-        backendRef.put("port", port);
-
-        List<Map<String, Object>> backendRefs = new ArrayList<>();
-        backendRefs.add(backendRef);
-        rule.put("backendRefs", backendRefs);
-
-        return rule;
+        return new HTTPRouteRuleBuilder()
+                .withMatches(pathPrefixMatch)
+                .withFilters(requestHeaderFilter, urlRewriteFilter)
+                .withBackendRefs(backendRef)
+                .build();
     }
 
-    private Map<String, Object> createRedirectRule(String path) {
-        Map<String, Object> rule = new HashMap<>();
+    private HTTPRouteRule createRedirectRule(String path) {
+        HTTPRouteMatch exactMatch = new HTTPRouteMatchBuilder()
+                .withPath(new HTTPPathMatchBuilder()
+                        .withType("Exact")
+                        .withValue(path)
+                        .build())
+                .build();
 
-        Map<String, Object> match = new HashMap<>();
-        Map<String, Object> matchPath = new HashMap<>();
-        matchPath.put("type", "Exact");
-        matchPath.put("value", path);
-        match.put("path", matchPath);
+        HTTPRouteFilter redirectFilter = new HTTPRouteFilterBuilder()
+                .withType("RequestRedirect")
+                .withRequestRedirect(new HTTPRequestRedirectFilterBuilder()
+                        .withStatusCode(302)
+                        .withPath(new HTTPPathModifierBuilder()
+                                .withType("ReplaceFullPath")
+                                .withReplaceFullPath(ensureTrailingSlash(path))
+                                .build())
+                        .build())
+                .build();
 
-        List<Map<String, Object>> matches = new ArrayList<>();
-        matches.add(match);
-        rule.put("matches", matches);
-
-        Map<String, Object> redirectPath = new HashMap<>();
-        redirectPath.put("type", "ReplaceFullPath");
-        redirectPath.put("replaceFullPath", ensureTrailingSlash(path));
-
-        Map<String, Object> requestRedirect = new HashMap<>();
-        requestRedirect.put("statusCode", 302);
-        requestRedirect.put("path", redirectPath);
-
-        Map<String, Object> redirectFilter = new HashMap<>();
-        redirectFilter.put("type", "RequestRedirect");
-        redirectFilter.put("requestRedirect", requestRedirect);
-
-        List<Map<String, Object>> filters = new ArrayList<>();
-        filters.add(redirectFilter);
-        rule.put("filters", filters);
-
-        return rule;
+        return new HTTPRouteRuleBuilder()
+                .withMatches(exactMatch)
+                .withFilters(redirectFilter)
+                .build();
     }
 
     private String ensureTrailingSlash(String value) {
         return value.endsWith("/") ? value : value + "/";
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean hasPathMatch(Map<String, Object> rule, String path) {
-        Object matchesObj = rule.get("matches");
-        if (!(matchesObj instanceof List)) {
+    private boolean hasPathMatch(HTTPRouteRule rule, String path) {
+        List<HTTPRouteMatch> matches = rule.getMatches();
+        if (matches == null) {
             return false;
         }
-        for (Object matchObj : (List<Object>) matchesObj) {
-            if (!(matchObj instanceof Map)) {
+        for (HTTPRouteMatch match : matches) {
+            if (match == null) {
                 continue;
             }
-            Map<String, Object> match = (Map<String, Object>) matchObj;
-            Object pathObj = match.get("path");
-            if (!(pathObj instanceof Map)) {
+            HTTPPathMatch pathMatch = match.getPath();
+            if (pathMatch == null || pathMatch.getValue() == null) {
                 continue;
             }
-            Map<String, Object> pathMap = (Map<String, Object>) pathObj;
-            Object value = pathMap.get("value");
-            if (value instanceof String
-                    && normalizePath(path).equals(normalizePath((String) value))) {
+            if (normalizePath(path).equals(normalizePath(pathMatch.getValue()))) {
                 return true;
             }
         }
         return false;
     }
 
-    private void editRouteWithRetry(String routeName, Consumer<GenericKubernetesResource> editor, String correlationId) {
+    private void editRouteWithRetry(String routeName, Consumer<HTTPRoute> editor, String correlationId) {
         for (int attempt = 1; attempt <= ROUTE_EDIT_MAX_RETRIES; attempt++) {
             try {
                 client.httpRoutes().resource(routeName).edit(routeToUpdate -> {
+                    if (routeToUpdate == null) {
+                        throw new KubernetesClientException("HTTPRoute " + routeName + " not found");
+                    }
                     editor.accept(routeToUpdate);
                     return routeToUpdate;
                 });

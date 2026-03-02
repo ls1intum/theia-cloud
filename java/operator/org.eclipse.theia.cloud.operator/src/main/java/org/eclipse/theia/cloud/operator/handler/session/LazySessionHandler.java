@@ -57,7 +57,7 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 
 /**
@@ -176,7 +176,7 @@ public class LazySessionHandler implements SessionHandler {
 
         // Get HTTPRoute
         ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_route", "Get HTTPRoute for app definition");
-        Optional<GenericKubernetesResource> routeOpt = ingressManager.getIngress(appDef, correlationId);
+        Optional<HTTPRoute> routeOpt = ingressManager.getIngress(appDef, correlationId);
         if (routeOpt.isEmpty()) {
             SessionStatusUtil.markError(client, session, correlationId, "HTTPRoute not available.");
             ingressSpan.setTag("outcome", "not_found");
@@ -328,7 +328,7 @@ public class LazySessionHandler implements SessionHandler {
         Tracing.finishSuccess(appDefSpan);
 
         ISpan ingressSpan = Tracing.childSpan(span, "lazy.get_route", "Get HTTPRoute for cleanup");
-        Optional<GenericKubernetesResource> routeOpt = ingressManager.getIngress(appDef, correlationId);
+        Optional<HTTPRoute> routeOpt = ingressManager.getIngress(appDef, correlationId);
         if (routeOpt.isEmpty()) {
             LOGGER.error(formatLogMessage(correlationId, "No HTTPRoute found for app definition."));
             ingressSpan.setTag("outcome", "not_found");

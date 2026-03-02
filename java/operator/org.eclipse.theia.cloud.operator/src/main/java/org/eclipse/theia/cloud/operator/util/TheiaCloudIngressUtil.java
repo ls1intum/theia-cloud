@@ -22,33 +22,25 @@ import java.util.Optional;
 
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 
-import io.fabric8.kubernetes.api.model.GenericKubernetesResource;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRoute;
+import io.fabric8.kubernetes.api.model.gatewayapi.v1.HTTPRouteList;
 import io.fabric8.kubernetes.client.NamespacedKubernetesClient;
-import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 
 public final class TheiaCloudIngressUtil {
-
-    private static final ResourceDefinitionContext HTTP_ROUTE_CONTEXT = new ResourceDefinitionContext.Builder()
-            .withGroup("gateway.networking.k8s.io")
-            .withVersion("v1")
-            .withPlural("httproutes")
-            .withKind("HTTPRoute")
-            .withNamespaced(true)
-            .build();
 
     private TheiaCloudIngressUtil() {
     }
 
     public static boolean checkForExistingIngressAndAddOwnerReferencesIfMissing(NamespacedKubernetesClient client,
             String namespace, AppDefinition appDefinition, String correlationId) {
-        Optional<GenericKubernetesResource> existingRouteWithParentAppDefinition = K8sUtil.getExistingHttpRoute(
+        Optional<HTTPRoute> existingRouteWithParentAppDefinition = K8sUtil.getExistingHttpRoute(
                 client, namespace, appDefinition.getMetadata().getName(), appDefinition.getMetadata().getUid());
         if (existingRouteWithParentAppDefinition.isPresent()) {
             return true;
         }
-        Optional<GenericKubernetesResource> route = K8sUtil.getExistingHttpRoute(client, namespace,
+        Optional<HTTPRoute> route = K8sUtil.getExistingHttpRoute(client, namespace,
                 appDefinition.getSpec().getIngressname());
         if (route.isPresent()) {
             OwnerReference ownerReference = new OwnerReference();
@@ -66,8 +58,8 @@ public final class TheiaCloudIngressUtil {
     }
 
     public static void addOwnerReferenceToHttpRoute(NamespacedKubernetesClient client, String namespace,
-            GenericKubernetesResource route, OwnerReference ownerReference) {
-        client.genericKubernetesResources(HTTP_ROUTE_CONTEXT).inNamespace(namespace)
+            HTTPRoute route, OwnerReference ownerReference) {
+        client.resources(HTTPRoute.class, HTTPRouteList.class).inNamespace(namespace)
                 .withName(route.getMetadata().getName())
                 .edit(resource -> {
                     List<OwnerReference> ownerReferences = resource.getMetadata().getOwnerReferences();

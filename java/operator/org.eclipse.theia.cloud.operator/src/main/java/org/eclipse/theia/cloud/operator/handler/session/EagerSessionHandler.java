@@ -28,7 +28,9 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.k8s.resource.session.SessionSpec;
+import org.eclipse.theia.cloud.common.k8s.resource.workspace.Workspace;
 import org.eclipse.theia.cloud.common.util.DataBridgeUtil;
+import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
@@ -229,16 +231,14 @@ public class EagerSessionHandler implements SessionHandler {
             }
             Tracing.finishSuccess(setupSpan);
 
-            // Language server setup is best-effort: the session remains usable even if LS creation fails.
-            boolean lsCreated = languageServerManager.createLanguageServer(session, appDef, Optional.empty(), correlationId);
-            if (!lsCreated) {
+            Optional<String> storageName = getStorageName(session, correlationId);
+            if (!languageServerManager.patchPvcIntoPrewarmedLsDeployment(appDef, instance.getInstanceId(), storageName, correlationId)) {
                 LOGGER.warn(formatLogMessage(correlationId,
-                    "Language server creation failed for session " + session.getMetadata().getName()
-                    + "; session will continue without language server support."));
+                    "Failed to patch PVC into prewarmed language server for session "
+                    + session.getMetadata().getName() + "; LS may not have workspace access."));
             }
 
-            // Only patch env vars when LS was successfully created; no point restarting Theia for a non-existent LS.
-            if (lsCreated && !languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
+            if (!languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
                 LOGGER.warn(formatLogMessage(correlationId,
                     "Failed to patch language server env vars into deployment " + instance.getDeploymentName()
                     + "; session will continue without language server env vars."));
@@ -355,6 +355,8 @@ public class EagerSessionHandler implements SessionHandler {
                 return false;
             }
 
+            languageServerManager.deletePrewarmedLanguageServer(appDef, instanceId, correlationId);
+
             // Release instance back to pool
             ISpan releaseSpan = Tracing.childSpan(span, "eager.release_instance", "Release pool instance");
             releaseSpan.setData("instance_id", instanceId);
@@ -389,6 +391,30 @@ public class EagerSessionHandler implements SessionHandler {
             annotations.put(SESSION_START_STRATEGY_ANNOTATION, SESSION_START_STRATEGY_EAGER);
             annotations.put(SESSION_INSTANCE_ID_ANNOTATION, String.valueOf(instanceId));
         });
+    }
+
+    private Optional<String> getStorageName(Session session, String correlationId) {
+        if (session.getSpec().isEphemeral()) {
+            return Optional.empty();
+        }
+        Optional<Workspace> workspace = client.workspaces().get(session.getSpec().getWorkspace());
+        if (workspace.isEmpty()) {
+            LOGGER.info(formatLogMessage(correlationId,
+                    "No workspace with name " + session.getSpec().getWorkspace() + " found for session "
+                            + session.getSpec().getName()));
+            return Optional.empty();
+        }
+        if (!session.getSpec().getUser().equals(workspace.get().getSpec().getUser())) {
+            LOGGER.error(formatLogMessage(correlationId, "Workspace is owned by " + workspace.get().getSpec().getUser()
+                    + ", but requesting user is " + session.getSpec().getUser()));
+            return Optional.empty();
+        }
+        String storageName = WorkspaceUtil.getStorageName(workspace.get());
+        if (!client.persistentVolumeClaimsClient().has(storageName)) {
+            LOGGER.info(formatLogMessage(correlationId, "No storage found. Using ephemeral storage."));
+            return Optional.empty();
+        }
+        return Optional.of(storageName);
     }
 
     private Integer getInstanceIdFromAnnotation(Session session) {

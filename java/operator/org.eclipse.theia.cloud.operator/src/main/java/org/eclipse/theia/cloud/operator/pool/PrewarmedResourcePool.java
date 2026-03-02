@@ -20,6 +20,9 @@ import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.util.LabelsUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerConfig;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager;
@@ -63,6 +66,12 @@ public class PrewarmedResourcePool {
 
     @Inject
     private K8sResourceFactory resourceFactory;
+
+    @Inject
+    private LanguageServerManager languageServerManager;
+
+    @Inject
+    private LanguageServerResourceFactory lsFactory;
 
     @Inject
     private TheiaCloudOperatorArguments arguments;
@@ -268,6 +277,8 @@ public class PrewarmedResourcePool {
                 Tracing.finish(deploySpan, failed == 0 ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             }
 
+            success &= ensureLanguageServerCapacity(appDef, minInstances, labels, correlationId);
+
             span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
@@ -472,6 +483,8 @@ public class PrewarmedResourcePool {
             deploySpan.setTag("had_changes", (deployResult.getCreated() + deployResult.getDeleted() + deployResult.getRecreated()) > 0 ? "true" : "false");
             deploySpan.finish();
 
+            success &= reconcileLanguageServers(appDef, targetInstances, labels, correlationId);
+
             span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
 
@@ -527,19 +540,18 @@ public class PrewarmedResourcePool {
             span.setData("found_configmaps", instanceConfigMaps.size());
 
             if (instanceId > minInstances) {
-                // Instance is outside pool size - delete everything
                 span.setTag("action", "delete_excess");
                 LOGGER.info(formatLogMessage(correlationId,
                         "Instance " + instanceId + " exceeds minInstances (" + minInstances + "), deleting"));
 
                 ISpan deleteSpan = span.startChild("pool.delete_excess_instance", "Delete excess instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                lsFactory.deletePrewarmedResources(appDef, instanceId, correlationId);
                 Tracing.finishSuccess(deleteSpan);
                 Tracing.finishSuccess(span);
                 return;
             }
 
-            // Check if any resource is outdated (generation mismatch)
             boolean outdated = isOutdated(instanceServices, currentGeneration)
                     || isOutdated(instanceDeployments, currentGeneration)
                     || isOutdated(instanceConfigMaps, currentGeneration);
@@ -551,6 +563,7 @@ public class PrewarmedResourcePool {
 
                 ISpan recreateSpan = span.startChild("pool.recreate_outdated_instance", "Recreate outdated instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                lsFactory.deletePrewarmedResources(appDef, instanceId, correlationId);
                 createInstanceResources(appDef, instanceId, correlationId);
                 Tracing.finishSuccess(recreateSpan);
                 Tracing.finishSuccess(span);
@@ -632,6 +645,55 @@ public class PrewarmedResourcePool {
         }
 
         resourceFactory.createDeploymentForEagerInstance(appDef, instanceId, labels, correlationId);
+
+        createLanguageServerResources(appDef, instanceId, labels, correlationId);
+    }
+
+    private void createLanguageServerResources(AppDefinition appDef, int instanceId,
+            Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return;
+        }
+        LanguageServerConfig config = configOpt.get();
+        lsFactory.createPrewarmedService(appDef, instanceId, config, labels, correlationId);
+        lsFactory.createPrewarmedDeployment(appDef, instanceId, config, labels, correlationId);
+    }
+
+    private boolean ensureLanguageServerCapacity(AppDefinition appDef, int minInstances,
+            Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return true;
+        }
+        LanguageServerConfig config = configOpt.get();
+        boolean success = true;
+        for (int instance = 1; instance <= minInstances; instance++) {
+            String deploymentName = LanguageServerResourceFactory.getPrewarmedDeploymentName(appDef, instance);
+            if (client.kubernetes().apps().deployments().withName(deploymentName).get() == null) {
+                success &= lsFactory.createPrewarmedService(appDef, instance, config, labels, correlationId).isPresent();
+                success &= lsFactory.createPrewarmedDeployment(appDef, instance, config, labels, correlationId).isPresent();
+            }
+        }
+        return success;
+    }
+
+    private boolean reconcileLanguageServers(AppDefinition appDef, int targetInstances,
+            Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return true;
+        }
+        LanguageServerConfig config = configOpt.get();
+        boolean success = true;
+        for (int instance = 1; instance <= targetInstances; instance++) {
+            String deploymentName = LanguageServerResourceFactory.getPrewarmedDeploymentName(appDef, instance);
+            if (client.kubernetes().apps().deployments().withName(deploymentName).get() == null) {
+                success &= lsFactory.createPrewarmedService(appDef, instance, config, labels, correlationId).isPresent();
+                success &= lsFactory.createPrewarmedDeployment(appDef, instance, config, labels, correlationId).isPresent();
+            }
+        }
+        return success;
     }
 
     private int parseInstanceIdOrDefault(Service service, int defaultValue) {

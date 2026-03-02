@@ -28,6 +28,11 @@ See [Architecture.md](documentation/Architecture.md) for more information on the
 This REST Service acts as the API for creating and stopping Theia-based products for an authenticated user as well as providing additional information.\
 The Theia Cloud service creates, modifies, and deletes the custom resources the operator listens to.
 
+#### Scaling admin endpoints
+
+Scaling operations for `AppDefinition` resources are exposed through admin endpoints under `/service/admin/appdefinition`.
+Access is restricted to users whose JWT `groups` claim contains the configured admin group (`theia.cloud.auth.admin.group`, defaults to `theia-cloud/admin`).
+
 ### Sample Dashboard and reusable JS/UI components
 
 Theia Cloud comes with a basic landing page/dashboard which allows to launch sessions.

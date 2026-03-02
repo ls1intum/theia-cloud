@@ -157,7 +157,28 @@ public class LanguageServerManager {
             deploymentName, session, configOpt.get(), appDef, correlationId);
     }
 
+    public boolean patchPvcIntoPrewarmedLsDeployment(
+            AppDefinition appDef,
+            int instanceId,
+            Optional<String> pvcName,
+            String correlationId) {
+
+        Optional<LanguageServerConfig> configOpt = getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            LOGGER.debug(formatLogMessage(correlationId,
+                "[LS] No language server configured, skipping PVC patching"));
+            return true;
+        }
+
+        String lsDeploymentName = LanguageServerResourceFactory.getPrewarmedDeploymentName(appDef, instanceId);
+        return factory.patchPvcIntoLsDeployment(lsDeploymentName, pvcName, appDef.getSpec(), correlationId);
+    }
+
     public void deleteLanguageServer(Session session, String correlationId) {
         factory.deleteResources(session, correlationId);
+    }
+
+    public void deletePrewarmedLanguageServer(AppDefinition appDef, int instanceId, String correlationId) {
+        factory.deletePrewarmedResources(appDef, instanceId, correlationId);
     }
 }

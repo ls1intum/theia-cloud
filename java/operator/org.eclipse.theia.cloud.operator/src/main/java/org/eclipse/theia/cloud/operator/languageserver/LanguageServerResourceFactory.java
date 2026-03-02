@@ -28,6 +28,7 @@ import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.tracing.Tracing;
+import org.eclipse.theia.cloud.common.util.NamingUtil;
 import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudPersistentVolumeUtil;
@@ -413,11 +414,180 @@ public class LanguageServerResourceFactory {
             .build());
     }
 
+    public Optional<Deployment> createPrewarmedDeployment(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Map<String, String> additionalLabels,
+            String correlationId) {
+
+        String appDefName = appDef.getMetadata().getName();
+        String appDefUID = appDef.getMetadata().getUid();
+        String deploymentName = getPrewarmedDeploymentName(appDef, instance);
+        String instanceLabel = NamingUtil.createName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Creating prewarmed deployment " + deploymentName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, deploymentName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, instanceLabel);
+            replacements.put(PLACEHOLDER_IMAGE, config.image());
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+            replacements.put(PLACEHOLDER_CPU_LIMIT, config.cpuLimit());
+            replacements.put(PLACEHOLDER_MEMORY_LIMIT, config.memoryLimit());
+            replacements.put(PLACEHOLDER_CPU_REQUEST, config.cpuRequest());
+            replacements.put(PLACEHOLDER_MEMORY_REQUEST, config.memoryRequest());
+
+            String deploymentYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_DEPLOYMENT, replacements, correlationId);
+
+            return K8sUtil.loadAndCreateDeploymentWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                deploymentYaml,
+                AppDefinition.API,
+                AppDefinition.KIND,
+                appDefName,
+                appDefUID,
+                0,
+                additionalLabels,
+                dep -> {});
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error creating prewarmed deployment " + deploymentName), e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Unexpected error creating prewarmed deployment " + deploymentName), e);
+            return Optional.empty();
+        }
+    }
+
+    public Optional<Service> createPrewarmedService(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Map<String, String> additionalLabels,
+            String correlationId) {
+
+        String appDefName = appDef.getMetadata().getName();
+        String appDefUID = appDef.getMetadata().getUid();
+        String serviceName = getPrewarmedServiceName(appDef, instance);
+        String instanceLabel = NamingUtil.createName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Creating prewarmed service " + serviceName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, serviceName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, instanceLabel);
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+
+            String serviceYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_SERVICE, replacements, correlationId);
+
+            return K8sUtil.loadAndCreateServiceWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                serviceYaml,
+                AppDefinition.API,
+                AppDefinition.KIND,
+                appDefName,
+                appDefUID,
+                0,
+                additionalLabels);
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error creating prewarmed service " + serviceName), e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Unexpected error creating prewarmed service " + serviceName), e);
+            return Optional.empty();
+        }
+    }
+
+    public boolean patchPvcIntoLsDeployment(
+            String lsDeploymentName,
+            Optional<String> pvcName,
+            AppDefinitionSpec appDefSpec,
+            String correlationId) {
+
+        if (pvcName.isEmpty()) {
+            LOGGER.debug(formatLogMessage(correlationId,
+                "[LS] No PVC to patch into LS deployment " + lsDeploymentName));
+            return true;
+        }
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Patching PVC " + pvcName.get() + " into LS deployment " + lsDeploymentName));
+
+        try {
+            AtomicBoolean patchApplied = new AtomicBoolean(false);
+
+            client.kubernetes().apps().deployments()
+                .withName(lsDeploymentName)
+                .edit(deployment -> {
+                    addVolumeClaimToDeployment(deployment, pvcName.get(), appDefSpec);
+                    patchApplied.set(true);
+                    return deployment;
+                });
+
+            if (!patchApplied.get()) {
+                LOGGER.warn(formatLogMessage(correlationId,
+                    "[LS] Failed to apply PVC patch to " + lsDeploymentName));
+                return false;
+            }
+
+            LOGGER.info(formatLogMessage(correlationId,
+                "[LS] Successfully patched PVC into " + lsDeploymentName));
+            return true;
+
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error patching PVC into " + lsDeploymentName), e);
+            return false;
+        }
+    }
+
+    public void deletePrewarmedResources(AppDefinition appDef, int instance, String correlationId) {
+        String deploymentName = getPrewarmedDeploymentName(appDef, instance);
+        String serviceName = getPrewarmedServiceName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Deleting prewarmed resources: " + deploymentName + ", " + serviceName));
+
+        try {
+            client.kubernetes().apps().deployments().withName(deploymentName).delete();
+            client.kubernetes().services().withName(serviceName).delete();
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error deleting prewarmed resources: " + deploymentName), e);
+        }
+    }
+
     public static String getDeploymentName(Session session) {
         return session.getMetadata().getName() + "-ls";
     }
 
     public static String getServiceName(Session session) {
         return session.getMetadata().getName() + "-ls";
+    }
+
+    public static String getPrewarmedDeploymentName(AppDefinition appDef, int instance) {
+        return NamingUtil.createName(appDef, instance, "ls");
+    }
+
+    public static String getPrewarmedServiceName(AppDefinition appDef, int instance) {
+        return NamingUtil.createName(appDef, instance, "ls");
     }
 }

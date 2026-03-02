@@ -18,7 +18,7 @@ Multi-language, multi-module system for running Theia IDE instances on Kubernete
 | `node/` | TypeScript / NPM Workspaces | Landing page (React/Vite), monitor, e2e tests |
 | `theia/` | TypeScript / Yarn + Lerna | Theia extensions (monitor, config-store) |
 | `dockerfiles/` | — | Multi-stage Docker images for all services |
-| `terraform/` | Terraform | Infra provisioning (Minikube, GKE, Helm) |
+| `terraform/` | Terraform | Not actively maintained by our team, might be outdated. |
 
 Current version: `1.2.0-SNAPSHOT`. Active feature branch: `feature/external-ls-v2`.
 
@@ -194,19 +194,3 @@ Configured via `.prettierrc.js` (in `theia/`) and ESLint with `typescript-eslint
 - **Quarkus tests**: `@QuarkusTest` + `@InjectMock` for CDI bean injection in tests.
 - Test class names end with `Tests` (e.g., `WorkspaceResourceTests`).
 - Static imports: `org.junit.jupiter.api.Assertions.*`, `org.mockito.Mockito.*`.
-
----
-
-## Pre-existing Known Issues
-
-- `Tracing cannot be resolved` LSP errors across many Java files are a **Maven classpath issue in the IDE only** — not real compilation errors. The code compiles fine with `mvn`.
-- Do not attempt to fix these LSP errors; they are pre-existing and unrelated to feature work.
-
----
-
-## Active Branch Context
-
-- Branch: `feature/external-ls-v2`
-- PR: #70 on `ls1intum/theia-cloud` fork
-- PR addresses CodeRabbit review comments on the External Language Server feature.
-- See commit history for the 14 fixes already applied (LS resource factory, eager/lazy session handlers, registry, config).

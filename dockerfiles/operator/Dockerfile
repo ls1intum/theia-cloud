@@ -48,6 +48,8 @@ RUN curl -fsSL -o sentry-agent.zip https://github.com/getsentry/sentry-java/rele
 # If set to true, enables Sentry Java agent flags.
 ENV SENTRY_ENABLE=false
 # Optional path for a mounted Sentry properties file.
+# No file is baked into the image at this path. If it is unset or missing,
+# Sentry starts without `-Dsentry.properties.file` and falls back to defaults/env vars.
 ENV SENTRY_PROPERTIES_FILE=/operator/sentry.properties
 
 RUN cat > /entrypoint.sh <<'EOF_ENTRYPOINT' && chmod +x /entrypoint.sh

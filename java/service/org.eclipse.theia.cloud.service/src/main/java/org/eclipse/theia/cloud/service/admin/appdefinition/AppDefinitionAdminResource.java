@@ -123,6 +123,9 @@ public class AppDefinitionAdminResource extends BaseResource {
 
         int resultingMin = request.minInstances != null ? request.minInstances : existingSpec.getMinInstances();
         Integer currentMax = existingSpec.getMaxInstances();
+        // if we don't have a maxInstances in the request or the existing spec, we
+        // cannot guarantee safety of the update and must thus conservatively set it to
+        // 0
         int resultingMax = request.maxInstances != null ? request.maxInstances : (currentMax != null ? currentMax : 0);
 
         if (resultingMin < 0) {

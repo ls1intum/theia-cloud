@@ -280,12 +280,12 @@ public class LanguageServerResourceFactory {
 
     public boolean patchEnvVarsIntoExistingDeployment(
             String deploymentName,
-            Session session,
+            String lsServiceName,
             LanguageServerConfig config,
             AppDefinition appDef,
             String correlationId) {
 
-        String serviceName = getServiceName(session);
+        String serviceName = lsServiceName;
 
         ISpan span = Tracing.childSpan("ls.patch_env", "Patch LS env vars into existing deployment");
         span.setTag("language", config.languageKey());

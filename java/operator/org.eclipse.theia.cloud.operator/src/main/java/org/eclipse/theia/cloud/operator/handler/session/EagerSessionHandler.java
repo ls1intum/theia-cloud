@@ -35,6 +35,7 @@ import org.eclipse.theia.cloud.operator.databridge.AsyncDataInjector;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
 import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerResourceFactory;
 import org.eclipse.theia.cloud.operator.pool.PrewarmedResourcePool;
 import org.eclipse.theia.cloud.common.tracing.Tracing;
 import org.eclipse.theia.cloud.operator.util.SessionEnvCollector;
@@ -238,7 +239,8 @@ public class EagerSessionHandler implements SessionHandler {
                     + session.getMetadata().getName() + "; LS may not have workspace access."));
             }
 
-            if (!languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), session, appDef, correlationId)) {
+            String prewarmedLsServiceName = LanguageServerResourceFactory.getPrewarmedServiceName(appDef, instance.getInstanceId());
+            if (!languageServerManager.patchEnvVarsIntoExistingDeployment(instance.getDeploymentName(), prewarmedLsServiceName, appDef, correlationId)) {
                 LOGGER.warn(formatLogMessage(correlationId,
                     "Failed to patch language server env vars into deployment " + instance.getDeploymentName()
                     + "; session will continue without language server env vars."));

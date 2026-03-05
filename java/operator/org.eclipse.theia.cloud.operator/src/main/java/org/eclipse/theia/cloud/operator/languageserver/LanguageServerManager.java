@@ -142,7 +142,7 @@ public class LanguageServerManager {
 
     public boolean patchEnvVarsIntoExistingDeployment(
             String deploymentName,
-            Session session,
+            String lsServiceName,
             AppDefinition appDef,
             String correlationId) {
 
@@ -154,7 +154,7 @@ public class LanguageServerManager {
         }
 
         return factory.patchEnvVarsIntoExistingDeployment(
-            deploymentName, session, configOpt.get(), appDef, correlationId);
+            deploymentName, lsServiceName, configOpt.get(), appDef, correlationId);
     }
 
     public boolean patchPvcIntoPrewarmedLsDeployment(

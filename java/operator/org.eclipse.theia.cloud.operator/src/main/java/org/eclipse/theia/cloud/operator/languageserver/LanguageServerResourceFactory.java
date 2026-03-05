@@ -420,6 +420,16 @@ public class LanguageServerResourceFactory {
             LanguageServerConfig config,
             Map<String, String> additionalLabels,
             String correlationId) {
+        return createPrewarmedDeployment(appDef, instance, config, Optional.empty(), additionalLabels, correlationId);
+    }
+
+    public Optional<Deployment> createPrewarmedDeployment(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Optional<String> pvcName,
+            Map<String, String> additionalLabels,
+            String correlationId) {
 
         String appDefName = appDef.getMetadata().getName();
         String appDefUID = appDef.getMetadata().getUid();
@@ -455,7 +465,13 @@ public class LanguageServerResourceFactory {
                 appDefUID,
                 0,
                 additionalLabels,
-                dep -> {});
+                dep -> {
+                    if (pvcName.isPresent()) {
+                        addVolumeClaimToDeployment(dep, pvcName.get(), appDef.getSpec());
+                        LOGGER.info(formatLogMessage(correlationId,
+                            "[LS] Mounted PVC " + pvcName.get() + " to prewarmed deployment " + deploymentName));
+                    }
+                });
 
         } catch (IOException | URISyntaxException e) {
             LOGGER.error(formatLogMessage(correlationId,

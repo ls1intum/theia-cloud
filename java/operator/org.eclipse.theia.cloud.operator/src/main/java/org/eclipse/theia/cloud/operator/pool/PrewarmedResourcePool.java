@@ -313,6 +313,7 @@ public class PrewarmedResourcePool {
             String ownerName = appDef.getMetadata().getName();
             String ownerUID = appDef.getMetadata().getUid();
             OwnerContext owner = OwnerContext.of(ownerName, ownerUID, AppDefinition.API, AppDefinition.KIND);
+            long currentGeneration = appDef.getMetadata().getGeneration();
             Map<String, String> labels = new HashMap<>();
 
             boolean success = true;
@@ -342,7 +343,10 @@ public class PrewarmedResourcePool {
                             .idExtractor(s -> TheiaCloudServiceUtil.getId(correlationId, appDef, s))
                             .resourceTypeName("service").createResource(instance -> {
                                 resourceFactory.createServiceForEagerInstance(appDef, instance, labels, correlationId);
-                            }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
+                            }).shouldRecreate(
+                                    s -> OwnershipManager.isOwnedSolelyBy(s, owner)
+                                            && isOutdated(s, currentGeneration))
+                            .recreateResource(s -> {
                                 Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
                                 if (id != null) {
                                     resourceFactory.createServiceForEagerInstance(appDef, id, labels, correlationId);
@@ -361,7 +365,10 @@ public class PrewarmedResourcePool {
                             .resourceTypeName("internal service").createResource(instance -> {
                                 resourceFactory.createInternalServiceForEagerInstance(appDef, instance, labels,
                                         correlationId);
-                            }).shouldRecreate(s -> OwnershipManager.isOwnedSolelyBy(s, owner)).recreateResource(s -> {
+                            }).shouldRecreate(
+                                    s -> OwnershipManager.isOwnedSolelyBy(s, owner)
+                                            && isOutdated(s, currentGeneration))
+                            .recreateResource(s -> {
                                 Integer id = TheiaCloudServiceUtil.getId(correlationId, appDef, s);
                                 if (id != null) {
                                     resourceFactory.createInternalServiceForEagerInstance(appDef, id, labels,
@@ -410,7 +417,8 @@ public class PrewarmedResourcePool {
                                 .resourceTypeName("proxy configmap")
                                 .createResource(instance -> resourceFactory.createProxyConfigMapForEagerInstance(appDef,
                                         instance, labels, correlationId))
-                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner))
+                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)
+                                        && isOutdated(cm, currentGeneration))
                                 .recreateResource(cm -> {
                                     Integer id = TheiaCloudConfigMapUtil.getProxyId(correlationId, appDef, cm);
                                     if (id != null) {
@@ -430,7 +438,8 @@ public class PrewarmedResourcePool {
                                 .resourceTypeName("email configmap")
                                 .createResource(instance -> resourceFactory.createEmailConfigMapForEagerInstance(appDef,
                                         instance, labels, correlationId))
-                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner))
+                                .shouldRecreate(cm -> OwnershipManager.isOwnedSolelyBy(cm, owner)
+                                        && isOutdated(cm, currentGeneration))
                                 .recreateResource(cm -> {
                                     Integer id = TheiaCloudConfigMapUtil.getEmailId(correlationId, appDef, cm);
                                     if (id != null) {
@@ -476,7 +485,10 @@ public class PrewarmedResourcePool {
                                 Optional<String> pvcName = createInstancePvc(appDef, instance, correlationId);
                                 resourceFactory.createDeploymentForEagerInstance(appDef, instance, pvcName, labels, correlationId);
                             })
-                            .shouldRecreate(d -> OwnershipManager.isOwnedSolelyBy(d, owner)).recreateResource(d -> {
+                            .shouldRecreate(
+                                    d -> OwnershipManager.isOwnedSolelyBy(d, owner)
+                                            && isOutdated(d, currentGeneration))
+                            .recreateResource(d -> {
                                 Integer id = TheiaCloudDeploymentUtil.getId(correlationId, appDef, d);
                                 if (id != null) {
                                     Optional<String> pvcName = createInstancePvc(appDef, id, correlationId);
@@ -594,24 +606,28 @@ public class PrewarmedResourcePool {
 
     private boolean isOutdated(List<? extends HasMetadata> resources, long currentGeneration) {
         for (var resource : resources) {
-            Map<String, String> labels = resource.getMetadata().getLabels();
-            if (labels == null) {
-                return true;
-            }
-            String genLabel = labels.get(APPDEFINITION_GENERATION_LABEL);
-            if (genLabel == null) {
-                return true;
-            }
-            try {
-                long resourceGen = Long.parseLong(genLabel);
-                if (resourceGen != currentGeneration) {
-                    return true;
-                }
-            } catch (NumberFormatException e) {
+            if (isOutdated(resource, currentGeneration)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean isOutdated(HasMetadata resource, long currentGeneration) {
+        Map<String, String> labels = resource.getMetadata().getLabels();
+        if (labels == null) {
+            return true;
+        }
+        String genLabel = labels.get(APPDEFINITION_GENERATION_LABEL);
+        if (genLabel == null) {
+            return true;
+        }
+        try {
+            long resourceGen = Long.parseLong(genLabel);
+            return resourceGen != currentGeneration;
+        } catch (NumberFormatException e) {
+            return true;
+        }
     }
 
     private void deleteInstanceResources(List<Service> services, List<Deployment> deployments,

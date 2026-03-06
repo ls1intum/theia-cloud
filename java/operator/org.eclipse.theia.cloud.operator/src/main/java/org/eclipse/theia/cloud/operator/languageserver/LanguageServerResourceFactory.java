@@ -1,0 +1,609 @@
+/********************************************************************************
+ * Copyright (C) 2025 EclipseSource and others.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0.
+ *
+ * SPDX-License-Identifier: EPL-2.0
+ ********************************************************************************/
+package org.eclipse.theia.cloud.operator.languageserver;
+
+import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
+
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
+import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
+import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
+import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
+import org.eclipse.theia.cloud.common.tracing.Tracing;
+import org.eclipse.theia.cloud.common.util.NamingUtil;
+import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
+import org.eclipse.theia.cloud.operator.util.K8sUtil;
+import org.eclipse.theia.cloud.operator.util.TheiaCloudPersistentVolumeUtil;
+
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
+
+import io.fabric8.kubernetes.api.model.Container;
+import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaimVolumeSource;
+import io.fabric8.kubernetes.api.model.PodSpec;
+import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.Volume;
+import io.fabric8.kubernetes.api.model.VolumeMount;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.sentry.ISpan;
+import io.sentry.SpanStatus;
+
+@Singleton
+public class LanguageServerResourceFactory {
+
+    private static final Logger LOGGER = LogManager.getLogger(LanguageServerResourceFactory.class);
+
+    private static final String TEMPLATE_LS_DEPLOYMENT = "/templateLanguageServerDeployment.yaml";
+    private static final String TEMPLATE_LS_SERVICE = "/templateLanguageServerService.yaml";
+
+    private static final String PLACEHOLDER_NAME = "PLACEHOLDER_NAME";
+    private static final String PLACEHOLDER_NAMESPACE = "PLACEHOLDER_NAMESPACE";
+    private static final String PLACEHOLDER_SESSION = "PLACEHOLDER_SESSION";
+    private static final String PLACEHOLDER_IMAGE = "PLACEHOLDER_IMAGE";
+    private static final String PLACEHOLDER_PORT = "PLACEHOLDER_PORT";
+    private static final String PLACEHOLDER_CPU_LIMIT = "PLACEHOLDER_CPU_LIMIT";
+    private static final String PLACEHOLDER_MEMORY_LIMIT = "PLACEHOLDER_MEMORY_LIMIT";
+    private static final String PLACEHOLDER_CPU_REQUEST = "PLACEHOLDER_CPU_REQUEST";
+    private static final String PLACEHOLDER_MEMORY_REQUEST = "PLACEHOLDER_MEMORY_REQUEST";
+
+    @Inject
+    private TheiaCloudClient client;
+
+    public Optional<Deployment> createDeployment(
+            Session session,
+            LanguageServerConfig config,
+            Optional<String> pvcName,
+            AppDefinitionSpec appDefSpec,
+            String correlationId) {
+
+        String sessionName = session.getMetadata().getName();
+        String sessionUID = session.getMetadata().getUid();
+        String deploymentName = getDeploymentName(session);
+
+        ISpan span = Tracing.childSpan("ls.deployment.create", "Create LS deployment");
+        span.setTag("language", config.languageKey());
+        span.setData("session", sessionName);
+        span.setData("deployment_name", deploymentName);
+
+        LOGGER.info(formatLogMessage(correlationId, 
+            "[LS] Creating deployment " + deploymentName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, deploymentName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, sessionName);
+            replacements.put(PLACEHOLDER_IMAGE, config.image());
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+            replacements.put(PLACEHOLDER_CPU_LIMIT, config.cpuLimit());
+            replacements.put(PLACEHOLDER_MEMORY_LIMIT, config.memoryLimit());
+            replacements.put(PLACEHOLDER_CPU_REQUEST, config.cpuRequest());
+            replacements.put(PLACEHOLDER_MEMORY_REQUEST, config.memoryRequest());
+
+            String deploymentYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_DEPLOYMENT, replacements, correlationId);
+
+            Optional<Deployment> deploymentOpt = K8sUtil.loadAndCreateDeploymentWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                deploymentYaml,
+                Session.API,
+                Session.KIND,
+                sessionName,
+                sessionUID,
+                0,
+                Collections.emptyMap(),
+                dep -> {
+                    if (pvcName.isPresent()) {
+                        addVolumeClaimToDeployment(dep, pvcName.get(), appDefSpec);
+                        LOGGER.info(formatLogMessage(correlationId, 
+                            "[LS] Mounted PVC " + pvcName.get() + " to deployment"));
+                    }
+                });
+
+            if (deploymentOpt.isPresent()) {
+                span.setData("deployment_uid", deploymentOpt.get().getMetadata().getUid());
+                Tracing.finishSuccess(span);
+                LOGGER.info(formatLogMessage(correlationId, 
+                    "[LS] Successfully created deployment " + deploymentName));
+                return deploymentOpt;
+            } else {
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
+                LOGGER.error(formatLogMessage(correlationId, 
+                    "[LS] Failed to create deployment " + deploymentName));
+                return Optional.empty();
+            }
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Error creating deployment " + deploymentName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Unexpected error creating deployment " + deploymentName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        }
+    }
+
+    public Optional<Service> createService(
+            Session session,
+            LanguageServerConfig config,
+            String correlationId) {
+
+        String sessionName = session.getMetadata().getName();
+        String sessionUID = session.getMetadata().getUid();
+        String serviceName = getServiceName(session);
+
+        ISpan span = Tracing.childSpan("ls.service.create", "Create LS service");
+        span.setTag("language", config.languageKey());
+        span.setData("session", sessionName);
+        span.setData("service_name", serviceName);
+
+        LOGGER.info(formatLogMessage(correlationId, 
+            "[LS] Creating service " + serviceName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, serviceName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, sessionName);
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+
+            String serviceYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_SERVICE, replacements, correlationId);
+
+            Optional<Service> serviceOpt = K8sUtil.loadAndCreateServiceWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                serviceYaml,
+                Session.API,
+                Session.KIND,
+                sessionName,
+                sessionUID,
+                0,
+                Collections.emptyMap());
+
+            if (serviceOpt.isPresent()) {
+                span.setData("service_uid", serviceOpt.get().getMetadata().getUid());
+                Tracing.finishSuccess(span);
+                LOGGER.info(formatLogMessage(correlationId, 
+                    "[LS] Successfully created service " + serviceName));
+                return serviceOpt;
+            } else {
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
+                LOGGER.error(formatLogMessage(correlationId, 
+                    "[LS] Failed to create service " + serviceName));
+                return Optional.empty();
+            }
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Error creating service " + serviceName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Unexpected error creating service " + serviceName), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        }
+    }
+
+    public void injectEnvVarsIntoTheia(
+            Deployment theiaDeployment,
+            Session session,
+            LanguageServerConfig config,
+            AppDefinition appDef,
+            String correlationId) {
+
+        String serviceName = getServiceName(session);
+
+        ISpan span = Tracing.childSpan("ls.inject_env", "Inject LS env vars");
+        span.setTag("language", config.languageKey());
+        span.setData("service_name", serviceName);
+
+        LOGGER.info(formatLogMessage(correlationId, 
+            "[LS] Injecting env vars for language " + config.languageKey() + " -> " + serviceName));
+
+        try {
+            PodSpec podSpec = theiaDeployment.getSpec().getTemplate().getSpec();
+            Container container = TheiaCloudPersistentVolumeUtil.getTheiaContainer(podSpec, appDef.getSpec());
+
+            if (container == null) {
+                LOGGER.error(formatLogMessage(correlationId, 
+                    "[LS] Could not find Theia container in deployment"));
+                span.setTag("outcome", "container_not_found");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
+                return;
+            }
+
+            applyLanguageServerEnvVars(container, config, serviceName);
+
+            Tracing.finishSuccess(span);
+            LOGGER.info(formatLogMessage(correlationId, 
+                "[LS] Successfully injected env vars: " + config.hostEnvVar() + "=" + serviceName));
+
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId, 
+                "[LS] Error injecting env vars"), e);
+            Tracing.finishError(span, e);
+        }
+    }
+
+    public void deleteResources(Session session, String correlationId) {
+        String resourceName = getDeploymentName(session);
+
+        ISpan span = Tracing.childSpan("ls.delete", "Delete LS resources");
+        span.setData("resource_name", resourceName);
+
+        LOGGER.info(formatLogMessage(correlationId, "[LS] Deleting resources: " + resourceName));
+
+        try {
+            client.kubernetes().apps().deployments().withName(resourceName).delete();
+            client.kubernetes().services().withName(resourceName).delete();
+
+            Tracing.finishSuccess(span);
+            LOGGER.info(formatLogMessage(correlationId, "[LS] Deleted resources: " + resourceName));
+
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error deleting resources: " + resourceName), e);
+            Tracing.finishError(span, e);
+        }
+    }
+
+    public boolean patchEnvVarsIntoExistingDeployment(
+            String deploymentName,
+            String lsServiceName,
+            LanguageServerConfig config,
+            AppDefinition appDef,
+            String correlationId) {
+
+        String serviceName = lsServiceName;
+
+        ISpan span = Tracing.childSpan("ls.patch_env", "Patch LS env vars into existing deployment");
+        span.setTag("language", config.languageKey());
+        span.setData("deployment", deploymentName);
+        span.setData("service_name", serviceName);
+
+        // Patching env vars into an existing Deployment triggers a Kubernetes pod restart.
+        // The Lazy session path avoids this by injecting env vars at deployment creation time.
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Patching env vars into deployment " + deploymentName + " for language " + config.languageKey()));
+
+        try {
+            AtomicBoolean patchApplied = new AtomicBoolean(false);
+
+            client.kubernetes().apps().deployments()
+                .withName(deploymentName)
+                .edit(deployment -> {
+                    PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
+                    Container container = TheiaCloudPersistentVolumeUtil.getTheiaContainer(podSpec, appDef.getSpec());
+
+                    if (container == null) {
+                        LOGGER.error(formatLogMessage(correlationId,
+                            "[LS] Could not find Theia container in deployment " + deploymentName));
+                        return deployment;
+                    }
+
+                    applyLanguageServerEnvVars(container, config, serviceName);
+                    patchApplied.set(true);
+                    return deployment;
+                });
+
+            if (!patchApplied.get()) {
+                span.setTag("outcome", "container_not_found");
+                Tracing.finish(span, SpanStatus.NOT_FOUND);
+                return false;
+            }
+
+            Tracing.finishSuccess(span);
+            LOGGER.info(formatLogMessage(correlationId,
+                "[LS] Successfully patched env vars: " + config.hostEnvVar() + "=" + serviceName));
+            return true;
+
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error patching env vars into " + deploymentName), e);
+            Tracing.finishError(span, e);
+            return false;
+        }
+    }
+
+    private void applyLanguageServerEnvVars(Container container, LanguageServerConfig config, String serviceName) {
+        List<EnvVar> envVars = container.getEnv();
+        if (envVars == null) {
+            envVars = new ArrayList<>();
+            container.setEnv(envVars);
+        }
+
+        envVars.removeIf(e ->
+            e.getName().equals(config.hostEnvVar()) ||
+            e.getName().equals(config.portEnvVar()) ||
+            e.getName().equals("LS_HOST") ||
+            e.getName().equals("LS_PORT") ||
+            e.getName().equals("LS_LANGUAGE"));
+
+        envVars.add(new EnvVarBuilder()
+            .withName(config.hostEnvVar())
+            .withValue(serviceName)
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName(config.portEnvVar())
+            .withValue(String.valueOf(config.containerPort()))
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_HOST")
+            .withValue(serviceName)
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_PORT")
+            .withValue(String.valueOf(config.containerPort()))
+            .build());
+        envVars.add(new EnvVarBuilder()
+            .withName("LS_LANGUAGE")
+            .withValue(config.languageKey())
+            .build());
+    }
+
+    private void addVolumeClaimToDeployment(Deployment deployment, String pvcName, AppDefinitionSpec appDefSpec) {
+        PodSpec podSpec = deployment.getSpec().getTemplate().getSpec();
+
+        Volume volume = new Volume();
+        volume.setName("workspace-data");
+        PersistentVolumeClaimVolumeSource pvcSource = new PersistentVolumeClaimVolumeSource();
+        pvcSource.setClaimName(pvcName);
+        volume.setPersistentVolumeClaim(pvcSource);
+
+        List<Volume> volumes = podSpec.getVolumes();
+        if (volumes == null) {
+            volumes = new ArrayList<>();
+            podSpec.setVolumes(volumes);
+        }
+        volumes.add(volume);
+
+        Container lsContainer = podSpec.getContainers().get(0);
+
+        String mountPath = TheiaCloudPersistentVolumeUtil.getMountPath(appDefSpec);
+
+        VolumeMount volumeMount = new VolumeMount();
+        volumeMount.setName("workspace-data");
+        volumeMount.setMountPath(mountPath);
+
+        List<VolumeMount> volumeMounts = lsContainer.getVolumeMounts();
+        if (volumeMounts == null) {
+            volumeMounts = new ArrayList<>();
+            lsContainer.setVolumeMounts(volumeMounts);
+        }
+        volumeMounts.add(volumeMount);
+
+        List<EnvVar> envVars = lsContainer.getEnv();
+        if (envVars == null) {
+            envVars = new ArrayList<>();
+            lsContainer.setEnv(envVars);
+        }
+        envVars.add(new EnvVarBuilder()
+            .withName("WORKSPACE_PATH")
+            .withValue(mountPath)
+            .build());
+    }
+
+    public Optional<Deployment> createPrewarmedDeployment(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Map<String, String> additionalLabels,
+            String correlationId) {
+        return createPrewarmedDeployment(appDef, instance, config, Optional.empty(), additionalLabels, correlationId);
+    }
+
+    public Optional<Deployment> createPrewarmedDeployment(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Optional<String> pvcName,
+            Map<String, String> additionalLabels,
+            String correlationId) {
+
+        String appDefName = appDef.getMetadata().getName();
+        String appDefUID = appDef.getMetadata().getUid();
+        String deploymentName = getPrewarmedDeploymentName(appDef, instance);
+        String instanceLabel = NamingUtil.createName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Creating prewarmed deployment " + deploymentName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, deploymentName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, instanceLabel);
+            replacements.put(PLACEHOLDER_IMAGE, config.image());
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+            replacements.put(PLACEHOLDER_CPU_LIMIT, config.cpuLimit());
+            replacements.put(PLACEHOLDER_MEMORY_LIMIT, config.memoryLimit());
+            replacements.put(PLACEHOLDER_CPU_REQUEST, config.cpuRequest());
+            replacements.put(PLACEHOLDER_MEMORY_REQUEST, config.memoryRequest());
+
+            String deploymentYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_DEPLOYMENT, replacements, correlationId);
+
+            return K8sUtil.loadAndCreateDeploymentWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                deploymentYaml,
+                AppDefinition.API,
+                AppDefinition.KIND,
+                appDefName,
+                appDefUID,
+                0,
+                additionalLabels,
+                dep -> {
+                    if (pvcName.isPresent()) {
+                        addVolumeClaimToDeployment(dep, pvcName.get(), appDef.getSpec());
+                        LOGGER.info(formatLogMessage(correlationId,
+                            "[LS] Mounted PVC " + pvcName.get() + " to prewarmed deployment " + deploymentName));
+                    }
+                });
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error creating prewarmed deployment " + deploymentName), e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Unexpected error creating prewarmed deployment " + deploymentName), e);
+            return Optional.empty();
+        }
+    }
+
+    public Optional<Service> createPrewarmedService(
+            AppDefinition appDef,
+            int instance,
+            LanguageServerConfig config,
+            Map<String, String> additionalLabels,
+            String correlationId) {
+
+        String appDefName = appDef.getMetadata().getName();
+        String appDefUID = appDef.getMetadata().getUid();
+        String serviceName = getPrewarmedServiceName(appDef, instance);
+        String instanceLabel = NamingUtil.createName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Creating prewarmed service " + serviceName + " for language " + config.languageKey()));
+
+        try {
+            Map<String, String> replacements = new HashMap<>();
+            replacements.put(PLACEHOLDER_NAME, serviceName);
+            replacements.put(PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(PLACEHOLDER_SESSION, instanceLabel);
+            replacements.put(PLACEHOLDER_PORT, String.valueOf(config.containerPort()));
+
+            String serviceYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                TEMPLATE_LS_SERVICE, replacements, correlationId);
+
+            return K8sUtil.loadAndCreateServiceWithOwnerReference(
+                client.kubernetes(),
+                client.namespace(),
+                correlationId,
+                serviceYaml,
+                AppDefinition.API,
+                AppDefinition.KIND,
+                appDefName,
+                appDefUID,
+                0,
+                additionalLabels);
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error creating prewarmed service " + serviceName), e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Unexpected error creating prewarmed service " + serviceName), e);
+            return Optional.empty();
+        }
+    }
+
+    public boolean patchPvcIntoLsDeployment(
+            String lsDeploymentName,
+            Optional<String> pvcName,
+            AppDefinitionSpec appDefSpec,
+            String correlationId) {
+
+        if (pvcName.isEmpty()) {
+            LOGGER.debug(formatLogMessage(correlationId,
+                "[LS] No PVC to patch into LS deployment " + lsDeploymentName));
+            return true;
+        }
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Patching PVC " + pvcName.get() + " into LS deployment " + lsDeploymentName));
+
+        try {
+            AtomicBoolean patchApplied = new AtomicBoolean(false);
+
+            client.kubernetes().apps().deployments()
+                .withName(lsDeploymentName)
+                .edit(deployment -> {
+                    addVolumeClaimToDeployment(deployment, pvcName.get(), appDefSpec);
+                    patchApplied.set(true);
+                    return deployment;
+                });
+
+            if (!patchApplied.get()) {
+                LOGGER.warn(formatLogMessage(correlationId,
+                    "[LS] Failed to apply PVC patch to " + lsDeploymentName));
+                return false;
+            }
+
+            LOGGER.info(formatLogMessage(correlationId,
+                "[LS] Successfully patched PVC into " + lsDeploymentName));
+            return true;
+
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error patching PVC into " + lsDeploymentName), e);
+            return false;
+        }
+    }
+
+    public void deletePrewarmedResources(AppDefinition appDef, int instance, String correlationId) {
+        String deploymentName = getPrewarmedDeploymentName(appDef, instance);
+        String serviceName = getPrewarmedServiceName(appDef, instance);
+
+        LOGGER.info(formatLogMessage(correlationId,
+            "[LS] Deleting prewarmed resources: " + deploymentName + ", " + serviceName));
+
+        try {
+            client.kubernetes().apps().deployments().withName(deploymentName).delete();
+            client.kubernetes().services().withName(serviceName).delete();
+        } catch (Exception e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                "[LS] Error deleting prewarmed resources: " + deploymentName), e);
+        }
+    }
+
+    public static String getDeploymentName(Session session) {
+        return session.getMetadata().getName() + "-ls";
+    }
+
+    public static String getServiceName(Session session) {
+        return session.getMetadata().getName() + "-ls";
+    }
+
+    public static String getPrewarmedDeploymentName(AppDefinition appDef, int instance) {
+        return NamingUtil.createName(appDef, instance, "ls");
+    }
+
+    public static String getPrewarmedServiceName(AppDefinition appDef, int instance) {
+        return NamingUtil.createName(appDef, instance, "ls");
+    }
+}

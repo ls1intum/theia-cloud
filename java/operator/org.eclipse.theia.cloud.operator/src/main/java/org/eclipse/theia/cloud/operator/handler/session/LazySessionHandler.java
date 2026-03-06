@@ -37,6 +37,7 @@ import org.eclipse.theia.cloud.common.util.WorkspaceUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
 import org.eclipse.theia.cloud.operator.ingress.IngressManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
 import org.eclipse.theia.cloud.operator.util.K8sResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.TheiaCloudK8sUtil;
@@ -82,6 +83,9 @@ public class LazySessionHandler implements SessionHandler {
 
     @Inject
     protected IngressManager ingressManager;
+
+    @Inject
+    protected LanguageServerManager languageServerManager;
 
     @Override
     public boolean sessionAdded(Session session, String correlationId, ISpan parentSpan) {
@@ -266,9 +270,19 @@ public class LazySessionHandler implements SessionHandler {
         deploymentSpan.setData("has_storage", storageName.isPresent());
         resourceFactory.createDeploymentForLazySession(
                 session, appDef, storageName, labels,
-                deployment -> storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec)),
+                deployment -> {
+                    storageName.ifPresent(name -> addVolumeClaim(deployment, name, appDefSpec));
+                    languageServerManager.injectEnvVars(deployment, session, appDef, correlationId);
+                },
                 correlationId);
         Tracing.finishSuccess(deploymentSpan);
+
+        // Language server setup is best-effort: the session remains usable even if LS creation fails.
+        if (!languageServerManager.createLanguageServer(session, appDef, storageName, correlationId)) {
+            LOGGER.warn(formatLogMessage(correlationId,
+                "Language server creation failed for session " + session.getMetadata().getName()
+                + "; session will continue without language server support."));
+        }
 
         // Add HTTPRoute rule
         ISpan ingressRuleSpan = Tracing.childSpan(span, "lazy.add_route_rule", "Add HTTPRoute rule");
@@ -299,7 +313,13 @@ public class LazySessionHandler implements SessionHandler {
 
     @Override
     public synchronized boolean sessionDeleted(Session session, String correlationId, ISpan parentSpan) {
-        return doSessionDeleted(session, correlationId, parentSpan);
+        ISpan span = Tracing.childSpan(parentSpan, "lazy.cleanup", "Lazy session cleanup");
+        try {
+            return doSessionDeleted(session, correlationId, span);
+        } catch (Exception e) {
+            Tracing.finishError(span, e);
+            throw e;
+        }
     }
 
     protected boolean doSessionDeleted(Session session, String correlationId, ISpan span) {
@@ -312,7 +332,6 @@ public class LazySessionHandler implements SessionHandler {
         span.setTag("session.strategy", "lazy");
         span.setTag("app_definition", appDefinitionID);
         span.setData("correlation_id", correlationId);
-
         ISpan appDefSpan = Tracing.childSpan(span, "lazy.find_appdef", "Find app definition");
         Optional<AppDefinition> appDefOpt = client.appDefinitions().get(appDefinitionID);
         if (appDefOpt.isEmpty()) {
@@ -321,7 +340,7 @@ public class LazySessionHandler implements SessionHandler {
             appDefSpan.setTag("outcome", "not_found");
             Tracing.finish(appDefSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "appdef_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         AppDefinition appDef = appDefOpt.get();
@@ -334,7 +353,7 @@ public class LazySessionHandler implements SessionHandler {
             ingressSpan.setTag("outcome", "not_found");
             Tracing.finish(ingressSpan, SpanStatus.NOT_FOUND);
             span.setTag("outcome", "route_not_found");
-            span.setStatus(SpanStatus.NOT_FOUND);
+            Tracing.finish(span, SpanStatus.NOT_FOUND);
             return false;
         }
         Tracing.finishSuccess(ingressSpan);
@@ -345,6 +364,8 @@ public class LazySessionHandler implements SessionHandler {
             ingressManager.removeRulesForSession(routeOpt.get(), appDef, session, correlationId);
             Tracing.finishSuccess(removeRulesSpan);
             LOGGER.info(formatLogMessage(correlationId, "Successfully cleaned up HTTPRoute rules for session"));
+            // Cleanup language server resources for lazy sessions.
+            languageServerManager.deleteLanguageServer(session, correlationId);
             span.setTag("outcome", "success");
             return true;
         } catch (KubernetesClientException e) {
@@ -352,6 +373,7 @@ public class LazySessionHandler implements SessionHandler {
             removeRulesSpan.setTag("outcome", "failed");
             Tracing.finishError(removeRulesSpan, e);
             span.setTag("outcome", "remove_rules_failed");
+            Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
             return false;
         }
     }

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: PLACEHOLDER_NAME
+  namespace: PLACEHOLDER_NAMESPACE
+  labels:
+    theia-cloud.io/component: language-server
+    theia-cloud.io/session: PLACEHOLDER_SESSION
+spec:
+  type: ClusterIP
+  ports:
+    - name: lsp
+      port: PLACEHOLDER_PORT
+      targetPort: PLACEHOLDER_PORT
+      protocol: TCP
+  selector:
+    app: PLACEHOLDER_NAME

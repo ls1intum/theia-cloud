@@ -2,10 +2,13 @@ package org.eclipse.theia.cloud.operator.pool;
 
 import static org.eclipse.theia.cloud.common.util.LogMessageUtil.formatLogMessage;
 
+import java.io.IOException;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,8 +21,14 @@ import org.eclipse.theia.cloud.common.k8s.client.TheiaCloudClient;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.session.Session;
 import org.eclipse.theia.cloud.common.util.LabelsUtil;
+import org.eclipse.theia.cloud.common.util.NamingUtil;
 import org.eclipse.theia.cloud.operator.TheiaCloudOperatorArguments;
 import org.eclipse.theia.cloud.operator.handler.AddedHandlerUtil;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerConfig;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerManager;
+import org.eclipse.theia.cloud.operator.languageserver.LanguageServerResourceFactory;
+import org.eclipse.theia.cloud.operator.replacements.DefaultPersistentVolumeTemplateReplacements;
+import org.eclipse.theia.cloud.operator.util.JavaResourceUtil;
 import org.eclipse.theia.cloud.operator.util.K8sResourceFactory;
 import org.eclipse.theia.cloud.operator.util.K8sUtil;
 import org.eclipse.theia.cloud.operator.util.OwnershipManager;
@@ -63,6 +72,12 @@ public class PrewarmedResourcePool {
 
     @Inject
     private K8sResourceFactory resourceFactory;
+
+    @Inject
+    private LanguageServerManager languageServerManager;
+
+    @Inject
+    private LanguageServerResourceFactory lsFactory;
 
     @Inject
     private TheiaCloudOperatorArguments arguments;
@@ -243,7 +258,7 @@ public class PrewarmedResourcePool {
                 }
             }
 
-            // Create missing deployments
+            // Create missing deployments (with shared PVC)
             if (!missingDeploymentIds.isEmpty()) {
                 ISpan deploySpan = span.startChild("pool.create_deployments", "Create missing deployments");
                 deploySpan.setData("count", missingDeploymentIds.size());
@@ -252,7 +267,8 @@ public class PrewarmedResourcePool {
                 for (int instance : missingDeploymentIds) {
                     ISpan depSpan = deploySpan.startChild("k8s.deployment.create", "Create deployment " + instance);
                     depSpan.setData("instance_id", instance);
-                    if (resourceFactory.createDeploymentForEagerInstance(appDef, instance, labels, correlationId)
+                    Optional<String> pvcName = createInstancePvc(appDef, instance, correlationId);
+                    if (resourceFactory.createDeploymentForEagerInstance(appDef, instance, pvcName, labels, correlationId)
                             .isPresent()) {
                         created++;
                         Tracing.finishSuccess(depSpan);
@@ -267,6 +283,8 @@ public class PrewarmedResourcePool {
                 deploySpan.setTag("outcome", failed == 0 ? "success" : "failure");
                 Tracing.finish(deploySpan, failed == 0 ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             }
+
+            success &= ensureLanguageServerCapacity(appDef, minInstances, labels, correlationId);
 
             span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
@@ -463,15 +481,18 @@ public class PrewarmedResourcePool {
                                     .inNamespace(client.namespace()).resource(d))
                             .idExtractor(d -> TheiaCloudDeploymentUtil.getId(correlationId, appDef, d))
                             .resourceTypeName("deployment")
-                            .createResource(instance -> resourceFactory.createDeploymentForEagerInstance(appDef,
-                                    instance, labels, correlationId))
+                            .createResource(instance -> {
+                                Optional<String> pvcName = createInstancePvc(appDef, instance, correlationId);
+                                resourceFactory.createDeploymentForEagerInstance(appDef, instance, pvcName, labels, correlationId);
+                            })
                             .shouldRecreate(
                                     d -> OwnershipManager.isOwnedSolelyBy(d, owner)
                                             && isOutdated(d, currentGeneration))
                             .recreateResource(d -> {
                                 Integer id = TheiaCloudDeploymentUtil.getId(correlationId, appDef, d);
                                 if (id != null) {
-                                    resourceFactory.createDeploymentForEagerInstance(appDef, id, labels, correlationId);
+                                    Optional<String> pvcName = createInstancePvc(appDef, id, correlationId);
+                                    resourceFactory.createDeploymentForEagerInstance(appDef, id, pvcName, labels, correlationId);
                                 }
                             }).build());
             success &= deployResult.isSuccess();
@@ -483,6 +504,8 @@ public class PrewarmedResourcePool {
             deploySpan.setTag("outcome", deployResult.isSuccess() ? "success" : "failure");
             deploySpan.setTag("had_changes", (deployResult.getCreated() + deployResult.getDeleted() + deployResult.getRecreated()) > 0 ? "true" : "false");
             deploySpan.finish();
+
+            success &= reconcileLanguageServers(appDef, targetInstances, labels, correlationId);
 
             span.setTag("outcome", success ? "success" : "failure"); Tracing.finish(span, success ? SpanStatus.OK : SpanStatus.INTERNAL_ERROR);
             return success;
@@ -539,19 +562,19 @@ public class PrewarmedResourcePool {
             span.setData("found_configmaps", instanceConfigMaps.size());
 
             if (instanceId > minInstances) {
-                // Instance is outside pool size - delete everything
                 span.setTag("action", "delete_excess");
                 LOGGER.info(formatLogMessage(correlationId,
                         "Instance " + instanceId + " exceeds minInstances (" + minInstances + "), deleting"));
 
                 ISpan deleteSpan = span.startChild("pool.delete_excess_instance", "Delete excess instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                lsFactory.deletePrewarmedResources(appDef, instanceId, correlationId);
+                deleteInstancePvc(appDef, instanceId, correlationId);
                 Tracing.finishSuccess(deleteSpan);
                 Tracing.finishSuccess(span);
                 return;
             }
 
-            // Check if any resource is outdated (generation mismatch)
             boolean outdated = isOutdated(instanceServices, currentGeneration)
                     || isOutdated(instanceDeployments, currentGeneration)
                     || isOutdated(instanceConfigMaps, currentGeneration);
@@ -563,6 +586,8 @@ public class PrewarmedResourcePool {
 
                 ISpan recreateSpan = span.startChild("pool.recreate_outdated_instance", "Recreate outdated instance");
                 deleteInstanceResources(instanceServices, instanceDeployments, instanceConfigMaps, correlationId);
+                lsFactory.deletePrewarmedResources(appDef, instanceId, correlationId);
+                deleteInstancePvc(appDef, instanceId, correlationId);
                 createInstanceResources(appDef, instanceId, correlationId);
                 Tracing.finishSuccess(recreateSpan);
                 Tracing.finishSuccess(span);
@@ -647,7 +672,60 @@ public class PrewarmedResourcePool {
             resourceFactory.createEmailConfigMapForEagerInstance(appDef, instanceId, labels, correlationId);
         }
 
-        resourceFactory.createDeploymentForEagerInstance(appDef, instanceId, labels, correlationId);
+        Optional<String> pvcName = createInstancePvc(appDef, instanceId, correlationId);
+
+        resourceFactory.createDeploymentForEagerInstance(appDef, instanceId, pvcName, labels, correlationId);
+
+        createLanguageServerResources(appDef, instanceId, pvcName, labels, correlationId);
+    }
+
+    private void createLanguageServerResources(AppDefinition appDef, int instanceId,
+            Optional<String> pvcName, Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return;
+        }
+        LanguageServerConfig config = configOpt.get();
+        lsFactory.createPrewarmedService(appDef, instanceId, config, labels, correlationId);
+        lsFactory.createPrewarmedDeployment(appDef, instanceId, config, pvcName, labels, correlationId);
+    }
+
+    private boolean ensureLanguageServerCapacity(AppDefinition appDef, int minInstances,
+            Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return true;
+        }
+        LanguageServerConfig config = configOpt.get();
+        boolean success = true;
+        for (int instance = 1; instance <= minInstances; instance++) {
+            String deploymentName = LanguageServerResourceFactory.getPrewarmedDeploymentName(appDef, instance);
+            if (client.kubernetes().apps().deployments().withName(deploymentName).get() == null) {
+                Optional<String> pvcName = lookupExistingPvc(appDef, instance);
+                success &= lsFactory.createPrewarmedService(appDef, instance, config, labels, correlationId).isPresent();
+                success &= lsFactory.createPrewarmedDeployment(appDef, instance, config, pvcName, labels, correlationId).isPresent();
+            }
+        }
+        return success;
+    }
+
+    private boolean reconcileLanguageServers(AppDefinition appDef, int targetInstances,
+            Map<String, String> labels, String correlationId) {
+        Optional<LanguageServerConfig> configOpt = languageServerManager.getLanguageServerConfig(appDef);
+        if (configOpt.isEmpty()) {
+            return true;
+        }
+        LanguageServerConfig config = configOpt.get();
+        boolean success = true;
+        for (int instance = 1; instance <= targetInstances; instance++) {
+            String deploymentName = LanguageServerResourceFactory.getPrewarmedDeploymentName(appDef, instance);
+            if (client.kubernetes().apps().deployments().withName(deploymentName).get() == null) {
+                Optional<String> pvcName = lookupExistingPvc(appDef, instance);
+                success &= lsFactory.createPrewarmedService(appDef, instance, config, labels, correlationId).isPresent();
+                success &= lsFactory.createPrewarmedDeployment(appDef, instance, config, pvcName, labels, correlationId).isPresent();
+            }
+        }
+        return success;
     }
 
     private int parseInstanceIdOrDefault(Service service, int defaultValue) {
@@ -1227,6 +1305,109 @@ public class PrewarmedResourcePool {
             }
         } catch (KubernetesClientException e) {
             LOGGER.error(formatLogMessage(correlationId, "Failed to delete pod"), e);
+        }
+    }
+
+    // ========== PVC Management ==========
+
+    private static final String TEMPLATE_PERSISTENTVOLUMECLAIM_YAML = "/templatePersistentVolumeClaim.yaml";
+
+    static String getInstancePvcName(AppDefinition appDef, int instanceId) {
+        return NamingUtil.createNameWithSuffix(appDef, instanceId, "pvc");
+    }
+
+    /**
+     * Creates a PersistentVolumeClaim for an eager-start pool instance. The PVC is owned by the AppDefinition so it
+     * survives session lifecycle and is cleaned up when the AppDefinition is deleted or the instance is scaled down.
+     *
+     * @return the PVC name if created successfully, or empty if creation fails or storage class is not configured
+     */
+    private Optional<String> createInstancePvc(AppDefinition appDef, int instanceId, String correlationId) {
+        String pvcName = getInstancePvcName(appDef, instanceId);
+
+        if (client.persistentVolumeClaimsClient().has(pvcName)) {
+            LOGGER.info(formatLogMessage(correlationId,
+                    "PVC " + pvcName + " already exists for instance " + instanceId));
+            return Optional.of(pvcName);
+        }
+
+        ISpan span = Tracing.childSpan("pool.create_pvc", "Create instance PVC");
+        span.setData("pvc_name", pvcName);
+        span.setData("instance_id", instanceId);
+
+        LOGGER.info(formatLogMessage(correlationId,
+                "Creating PVC " + pvcName + " for pool instance " + instanceId));
+
+        try {
+            Map<String, String> replacements = new LinkedHashMap<>();
+            replacements.put(DefaultPersistentVolumeTemplateReplacements.PLACEHOLDER_PERSISTENTVOLUMENAME, pvcName);
+            replacements.put(TheiaCloudHandlerUtil.PLACEHOLDER_NAMESPACE, client.namespace());
+            replacements.put(DefaultPersistentVolumeTemplateReplacements.PLACEHOLDER_LABEL_WORKSPACE_NAME,
+                    appDef.getSpec().getName() + "-instance-" + instanceId);
+            replacements.put(DefaultPersistentVolumeTemplateReplacements.PLACEHOLDER_STORAGE_CLASS_NAME,
+                    arguments.getStorageClassName() != null ? arguments.getStorageClassName() : "");
+            replacements.put(DefaultPersistentVolumeTemplateReplacements.PLACEHOLDER_REQUESTED_STORAGE,
+                    arguments.getRequestedStorage() != null ? arguments.getRequestedStorage()
+                            : DefaultPersistentVolumeTemplateReplacements.DEFAULT_REQUESTED_STORAGE);
+
+            String pvcYaml = JavaResourceUtil.readResourceAndReplacePlaceholders(
+                    TEMPLATE_PERSISTENTVOLUMECLAIM_YAML, replacements, correlationId);
+
+            Optional<io.fabric8.kubernetes.api.model.PersistentVolumeClaim> result =
+                    client.persistentVolumeClaimsClient().loadAndCreate(correlationId, pvcYaml,
+                            claim -> claim.addOwnerReference(appDef));
+
+            if (result.isPresent()) {
+                Tracing.finishSuccess(span);
+                LOGGER.info(formatLogMessage(correlationId,
+                        "Successfully created PVC " + pvcName));
+                return Optional.of(pvcName);
+            } else {
+                span.setTag("outcome", "failure");
+                Tracing.finish(span, SpanStatus.INTERNAL_ERROR);
+                LOGGER.error(formatLogMessage(correlationId,
+                        "Failed to create PVC " + pvcName));
+                return Optional.empty();
+            }
+
+        } catch (IOException | URISyntaxException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Error loading PVC template for instance " + instanceId), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            LOGGER.error(formatLogMessage(correlationId,
+                    "Unexpected error creating PVC for instance " + instanceId), e);
+            Tracing.finishError(span, e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Deletes the PVC for a pool instance. Best-effort — logs warnings on failure.
+     */
+    private Optional<String> lookupExistingPvc(AppDefinition appDef, int instanceId) {
+        String pvcName = getInstancePvcName(appDef, instanceId);
+        if (client.persistentVolumeClaimsClient().has(pvcName)) {
+            return Optional.of(pvcName);
+        }
+        return Optional.empty();
+    }
+
+    private void deleteInstancePvc(AppDefinition appDef, int instanceId, String correlationId) {
+        String pvcName = getInstancePvcName(appDef, instanceId);
+
+        LOGGER.info(formatLogMessage(correlationId,
+                "Deleting PVC " + pvcName + " for pool instance " + instanceId));
+
+        try {
+            client.kubernetes().persistentVolumeClaims()
+                    .inNamespace(client.namespace())
+                    .withName(pvcName)
+                    .delete();
+            LOGGER.info(formatLogMessage(correlationId, "Deleted PVC " + pvcName));
+        } catch (KubernetesClientException e) {
+            LOGGER.warn(formatLogMessage(correlationId, "Failed to delete PVC " + pvcName), e);
         }
     }
 }

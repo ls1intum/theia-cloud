@@ -39,7 +39,7 @@
     "update:demo:monitor": "npm run build:vsix && rm ../../demo/dockerfiles/demo-theia-monitor-vscode/*vsix && mv *.vsix ../../demo/dockerfiles/demo-theia-monitor-vscode"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "express": "^4.22.1",
     "express-formidable": "^1.2.0"
   },
   "devDependencies": {
@@ -52,7 +52,7 @@
     "eslint": "^8.26.0",
     "ts-loader": "^9.3.1",
     "@vscode/vsce": "^2.22.0",
-    "webpack": "^5.74.0",
+    "webpack": "^5.105.4",
     "webpack-cli": "^4.10.0"
   }
 }

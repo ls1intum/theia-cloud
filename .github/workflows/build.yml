@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   determine-tag:
-    runs-on: arc-runner-set-stateless
+    runs-on: ubuntu
     outputs:
       base_tag: ${{ steps.set-tag.outputs.base_tag }}
       sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
@@ -65,7 +65,7 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "arc-runner-set-stateless"
+      runner-amd64: "ubuntu"
       runner-arm64: "arc-runner-set-arm64"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
@@ -90,7 +90,7 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "arc-runner-set-stateless"
+      runner-amd64: "ubuntu"
       runner-arm64: "arc-runner-set-arm64"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
@@ -116,7 +116,7 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "arc-runner-set-stateless"
+      runner-amd64: "ubuntu"
       runner-arm64: "arc-runner-set-arm64"
       network: host
       docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"

@@ -108,4 +108,18 @@ class ApplicationPropertiesTests {
         ApplicationProperties fixture = new ApplicationProperties();
         assertEquals(fixture.getServiceAuthToken(), fixture.getAppId());
     }
+
+    @Test
+    void adminApiToken_emptyByDefault() {
+        System.clearProperty("theia.cloud.admin.api.token");
+        ApplicationProperties fixture = new ApplicationProperties();
+        assertTrue(fixture.getAdminApiToken().isEmpty());
+    }
+
+    @Test
+    void adminApiToken_trimWhitespace() {
+        System.setProperty("theia.cloud.admin.api.token", " token-a ");
+        ApplicationProperties fixture = new ApplicationProperties();
+        assertEquals("token-a", fixture.getAdminApiToken());
+    }
 }

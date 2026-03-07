@@ -13,25 +13,24 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
-package org.eclipse.theia.cloud.service.admin.appdefinition;
+package org.eclipse.theia.cloud.service;
 
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
-import org.eclipse.theia.cloud.service.ServiceRequest;
+import static java.lang.annotation.ElementType.METHOD;
+import static java.lang.annotation.ElementType.TYPE;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
-@Schema(name = "AppDefinitionGetRequest", description = "A request to get a single app definition.")
-public class AppDefinitionGetRequest extends ServiceRequest {
-    public static final String KIND = "appDefinitionGetRequest";
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
 
-    public AppDefinitionGetRequest() {
-        super(KIND);
-    }
+import jakarta.ws.rs.NameBinding;
 
-    public AppDefinitionGetRequest(String appId) {
-        super(KIND, appId);
-    }
-
-    @Override
-    public String toString() {
-        return "AppDefinitionGetRequest [appId=" + appId + ", kind=" + kind + "]";
-    }
+/**
+ * Annotation to mark resources protected by an admin API token.
+ */
+@Inherited
+@NameBinding
+@Retention(RUNTIME)
+@Target({ TYPE, METHOD })
+public @interface AdminApiTokenProtected {
 }

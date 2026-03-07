@@ -19,14 +19,14 @@ import java.util.List;
 import java.util.Optional;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
-import org.eclipse.theia.cloud.service.AdminOnly;
+import org.eclipse.theia.cloud.service.AdminApiTokenProtected;
 import org.eclipse.theia.cloud.service.ApplicationProperties;
 import org.eclipse.theia.cloud.service.BaseResource;
 import org.eclipse.theia.cloud.service.K8sUtil;
-import org.eclipse.theia.cloud.service.appdefinition.AppDefinitionListRequest;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
@@ -43,7 +43,7 @@ import jakarta.ws.rs.core.MediaType;
  * Resource for admin operations on app definitions.
  */
 @Path("/service/admin/appdefinition")
-@AdminOnly
+@AdminApiTokenProtected
 public class AppDefinitionAdminResource extends BaseResource {
 
     @Inject
@@ -55,24 +55,18 @@ public class AppDefinitionAdminResource extends BaseResource {
     }
 
     @Operation(summary = "List scaling settings for all app definitions", description = "Lists minInstances and maxInstances for all app definitions.")
-    @Parameter(name = "appId", description = "The app id used for service request validation.")
     @GET
-    @Path("/{appId}")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<AppDefinitionScaling> list(@PathParam("appId") String appId) {
-        evaluateRequest(new AppDefinitionListRequest(appId));
+    public List<AppDefinitionScaling> list() {
         return k8sUtil.listAppDefinitionResources().stream().map(this::toScaling).toList();
     }
 
     @Operation(summary = "Get scaling settings for an app definition", description = "Returns minInstances and maxInstances for a specific app definition.")
     @Parameter(name = "appDefinitionName", description = "The K8S resource name of the app definition.")
-    @Parameter(name = "appId", description = "The app id used for service request validation.")
     @GET
-    @Path("/{appDefinitionName}/{appId}")
+    @Path("/{appDefinitionName}")
     @Produces(MediaType.APPLICATION_JSON)
-    public AppDefinitionScaling get(@PathParam("appDefinitionName") String appDefinitionName,
-            @PathParam("appId") String appId) {
-        evaluateRequest(new AppDefinitionGetRequest(appId));
+    public AppDefinitionScaling get(@PathParam("appDefinitionName") String appDefinitionName) {
         AppDefinition appDefinition = k8sUtil.getAppDefinition(appDefinitionName)
                 .orElseThrow(() -> new NotFoundException("App definition does not exist."));
         return toScaling(appDefinition);
@@ -84,12 +78,13 @@ public class AppDefinitionAdminResource extends BaseResource {
     @Path("/{appDefinitionName}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @RequestBody(required = true)
     public AppDefinition update(@PathParam("appDefinitionName") String appDefinitionName,
             AppDefinitionUpdateRequest request) {
         if (request == null) {
             throw new BadRequestException("Request body is required.");
         }
-        String correlationId = evaluateRequest(request);
+        String correlationId = "appdefinition-admin-update";
         Optional<AppDefinition> appDefinition = k8sUtil.getAppDefinition(appDefinitionName);
         if (appDefinition.isEmpty()) {
             throw new NotFoundException("App definition does not exist.");

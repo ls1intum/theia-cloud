@@ -36,16 +36,12 @@ import org.mockito.Mockito;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.security.TestSecurity;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 
 @QuarkusTest
-@TestSecurity(authorizationEnabled = false)
 class AppDefinitionAdminResourceTests {
-
-    private static final String APP_ID = "asdfghjkl";
     private static final String APP_DEF = "java-17-latest";
 
     @InjectMock
@@ -68,7 +64,7 @@ class AppDefinitionAdminResourceTests {
         AppDefinition second = appDefinition("python", 0, 10);
         Mockito.when(k8sUtil.listAppDefinitionResources()).thenReturn(List.of(first, second));
 
-        List<AppDefinitionScaling> result = fixture.list(APP_ID);
+        List<AppDefinitionScaling> result = fixture.list();
 
         assertEquals(2, result.size());
         assertEquals("java", result.get(0).appDefinitionName);
@@ -83,7 +79,7 @@ class AppDefinitionAdminResourceTests {
     void get_existingAppDefinition_returnsScalingSettings() {
         Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.of(appDefinition(APP_DEF, 2, 8)));
 
-        AppDefinitionScaling result = fixture.get(APP_DEF, APP_ID);
+        AppDefinitionScaling result = fixture.get(APP_DEF);
 
         assertEquals(APP_DEF, result.appDefinitionName);
         assertEquals(2, result.minInstances);
@@ -94,7 +90,7 @@ class AppDefinitionAdminResourceTests {
     void get_missingAppDefinition_throwsNotFound() {
         Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.empty());
 
-        assertThrows(NotFoundException.class, () -> fixture.get(APP_DEF, APP_ID));
+        assertThrows(NotFoundException.class, () -> fixture.get(APP_DEF));
     }
 
     @Test
@@ -170,7 +166,7 @@ class AppDefinitionAdminResourceTests {
     }
 
     private AppDefinitionUpdateRequest request(Integer minInstances, Integer maxInstances) {
-        AppDefinitionUpdateRequest request = new AppDefinitionUpdateRequest(APP_ID);
+        AppDefinitionUpdateRequest request = new AppDefinitionUpdateRequest();
         request.minInstances = minInstances;
         request.maxInstances = maxInstances;
         return request;

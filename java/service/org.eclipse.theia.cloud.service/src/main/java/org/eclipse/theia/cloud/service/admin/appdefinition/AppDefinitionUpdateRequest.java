@@ -16,10 +16,8 @@
 package org.eclipse.theia.cloud.service.admin.appdefinition;
 
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
-import org.eclipse.theia.cloud.service.ServiceRequest;
 
-public class AppDefinitionUpdateRequest extends ServiceRequest {
-    public static final String KIND = "appDefinitionUpdateRequest";
+public class AppDefinitionUpdateRequest {
 
     @Schema(description = "The minimum number of instances to run.", required = false)
     public Integer minInstances;
@@ -27,17 +25,8 @@ public class AppDefinitionUpdateRequest extends ServiceRequest {
     @Schema(description = "The maximum number of instances to run.", required = false)
     public Integer maxInstances;
 
-    public AppDefinitionUpdateRequest() {
-        super(KIND);
-    }
-
-    public AppDefinitionUpdateRequest(String appId) {
-        super(KIND, appId);
-    }
-
     @Override
     public String toString() {
-        return "AppDefinitionUpdateRequest [minInstances=" + minInstances + ", maxInstances=" + maxInstances
-                + ", appId=" + appId + ", kind=" + kind + "]";
+        return "AppDefinitionUpdateRequest [minInstances=" + minInstances + ", maxInstances=" + maxInstances + "]";
     }
 }

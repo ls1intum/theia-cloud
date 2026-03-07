@@ -31,7 +31,8 @@ The Theia Cloud service creates, modifies, and deletes the custom resources the 
 #### Scaling admin endpoints
 
 Scaling operations for `AppDefinition` resources are exposed through admin endpoints under `/service/admin/appdefinition`.
-Access is restricted to users whose JWT `groups` claim contains the configured admin group (`theia.cloud.auth.admin.group`, defaults to `theia-cloud/admin`).
+Access is restricted to callers presenting a bearer token from `theia.cloud.admin.api.token`.
+In Helm-based deployments, provide this token through a pre-created Kubernetes Secret referenced by `service.adminApiTokenSecret`.
 
 ### Sample Dashboard and reusable JS/UI components
 

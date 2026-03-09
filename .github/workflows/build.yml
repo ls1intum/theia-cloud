@@ -24,6 +24,7 @@ jobs:
       base_tag: ${{ steps.set-tag.outputs.base_tag }}
       sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
       cache_tag: ${{ steps.set-tag.outputs.cache_tag }}
+      image_repo: ${{ steps.set-tag.outputs.image_repo }}
     steps:
       - name: Checkout for SHA access
         uses: actions/checkout@v4
@@ -32,6 +33,7 @@ jobs:
         id: set-tag
         run: |
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          IMAGE_REPO="$(echo "${{ github.repository_owner }}/${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
           
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
@@ -52,13 +54,14 @@ jobs:
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "cache_tag=${CACHE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
 
   build-and-push-landing-page:
     needs: determine-tag
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/landing-page/Dockerfile
-      image-name: ghcr.io/ls1intum/theia/landing-page
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/landing-page
       docker-context: .
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
@@ -73,9 +76,9 @@ jobs:
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
       cache-from: |
-        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
-        type=registry,ref=ghcr.io/ls1intum/theia/landing-page:build-cache
-      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/landing-page:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:build-cache
+      cache-to: "type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets: inherit
 
   build-and-push-operator:
@@ -83,7 +86,7 @@ jobs:
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/operator/Dockerfile
-      image-name: ghcr.io/ls1intum/theia/operator
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/operator
       docker-context: .
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
@@ -98,9 +101,9 @@ jobs:
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
       cache-from: |
-        type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }}
-        type=registry,ref=ghcr.io/ls1intum/theia/operator:build-cache
-      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/operator:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:build-cache
+      cache-to: "type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: ${{ secrets.SENTRY_AUTH_TOKEN != '' && format('SENTRY_AUTH_TOKEN={0}', secrets.SENTRY_AUTH_TOKEN) || '' }}
 
@@ -109,7 +112,7 @@ jobs:
     uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@feature/arc-runner-support
     with:
       docker-file: dockerfiles/service/Dockerfile
-      image-name: ghcr.io/ls1intum/theia/service
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/service
       docker-context: .
       tags: |
         ${{ needs.determine-tag.outputs.base_tag }}
@@ -124,8 +127,8 @@ jobs:
       npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
       apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
       cache-from: |
-        type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }}
-        type=registry,ref=ghcr.io/ls1intum/theia/service:build-cache
-      cache-to: "type=registry,ref=ghcr.io/ls1intum/theia/service:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:${{ needs.determine-tag.outputs.cache_tag }}
+        type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:build-cache
+      cache-to: "type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:${{ needs.determine-tag.outputs.cache_tag }},mode=max"
     secrets:
       docker-secrets: ${{ secrets.SENTRY_AUTH_TOKEN != '' && format('SENTRY_AUTH_TOKEN={0}', secrets.SENTRY_AUTH_TOKEN) || '' }}

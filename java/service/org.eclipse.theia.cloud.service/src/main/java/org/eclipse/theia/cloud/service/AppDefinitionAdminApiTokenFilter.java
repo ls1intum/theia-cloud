@@ -22,19 +22,18 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
-import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 
 /**
- * ContainerRequestFilter protecting app definition admin endpoints with a bearer token.
+ * ContainerRequestFilter protecting app definition admin endpoints with a dedicated admin token header.
  */
 @Provider
 @AdminApiTokenProtected
 @Priority(Priorities.AUTHORIZATION)
 public class AppDefinitionAdminApiTokenFilter implements ContainerRequestFilter {
 
-    private static final String BEARER_PREFIX = "Bearer ";
+    private static final String ADMIN_API_TOKEN_HEADER = "X-Admin-Api-Token";
 
     @Inject
     Logger logger;
@@ -52,17 +51,16 @@ public class AppDefinitionAdminApiTokenFilter implements ContainerRequestFilter 
             return;
         }
 
-        String authorizationHeader = requestContext.getHeaderString(HttpHeaders.AUTHORIZATION);
-        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {
-            logger.infov("Blocked access to {0} {1}: missing bearer token.", requestContext.getMethod(),
+        String presentedToken = requestContext.getHeaderString(ADMIN_API_TOKEN_HEADER);
+        if (presentedToken == null || presentedToken.isBlank()) {
+            logger.infov("Blocked access to {0} {1}: missing admin API token header.", requestContext.getMethod(),
                     requestContext.getUriInfo().getPath());
-            abort(requestContext, Response.Status.UNAUTHORIZED, "Bearer admin API token required.");
+            abort(requestContext, Response.Status.UNAUTHORIZED, "Admin API token required in X-Admin-Api-Token header.");
             return;
         }
 
-        String presentedToken = authorizationHeader.substring(BEARER_PREFIX.length());
-        if (presentedToken.isEmpty() || !configuredToken.equals(presentedToken)) {
-            logger.infov("Blocked access to {0} {1}: invalid bearer token.", requestContext.getMethod(),
+        if (!configuredToken.equals(presentedToken)) {
+            logger.infov("Blocked access to {0} {1}: invalid admin API token.", requestContext.getMethod(),
                     requestContext.getUriInfo().getPath());
             abort(requestContext, Response.Status.FORBIDDEN, "Valid admin API token required.");
         }

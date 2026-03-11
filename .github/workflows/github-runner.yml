@@ -1,0 +1,79 @@
+name: Build and Push Cloud Images (GitHub-hosted runners)
+
+# Builds using standard GitHub-hosted runners.
+# No dependency on cluster-internal services or ARC infrastructure.
+# Slower than the ARC variant but fully self-contained and reliable.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  determine-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      base_tag: ${{ steps.set-tag.outputs.base_tag }}
+      sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
+      image_repo: ${{ steps.set-tag.outputs.image_repo }}
+    steps:
+      - name: Checkout for SHA access
+        uses: actions/checkout@v4
+
+      - name: Set tags
+        id: set-tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          IMAGE_REPO="$(echo "${{ github.repository_owner }}/${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_TAG="pr-${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            BASE_TAG="${{ github.event.release.tag_name }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+            BASE_TAG="latest"
+          else
+            BASE_TAG="${{ github.ref_name }}"
+          fi
+
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${BASE_TAG}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
+
+  build-and-push-landing-page:
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@v1.2.0
+    with:
+      docker-file: dockerfiles/landing-page/Dockerfile
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/landing-page
+      docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      network: host
+    secrets: inherit
+
+  build-and-push-operator:
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@v1.2.0
+    with:
+      docker-file: dockerfiles/operator/Dockerfile
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/operator
+      docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      network: host
+    secrets: inherit
+
+  build-and-push-service:
+    needs: determine-tag
+    uses: ls1intum/.github/.github/workflows/build-and-push-docker-image.yml@v1.2.0
+    with:
+      docker-file: dockerfiles/service/Dockerfile
+      image-name: ${{ needs.determine-tag.outputs.image_repo }}/service
+      docker-context: .
+      tags: |
+        ${{ needs.determine-tag.outputs.base_tag }}
+        ${{ needs.determine-tag.outputs.sha_tag }}
+      network: host
+    secrets: inherit

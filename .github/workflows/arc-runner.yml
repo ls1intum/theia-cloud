@@ -65,6 +65,7 @@ jobs:
       runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
       registry-mirror: "http://131.159.88.30:30081"
+      setup-qemu: false
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:build-cache
@@ -87,6 +88,7 @@ jobs:
       runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
       registry-mirror: "http://131.159.88.30:30081"
+      setup-qemu: false
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:build-cache
@@ -110,6 +112,7 @@ jobs:
       runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
       registry-mirror: "http://131.159.88.30:30081"
+      setup-qemu: false
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:build-cache

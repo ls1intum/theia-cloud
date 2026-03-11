@@ -52,7 +52,7 @@ jobs:
           else
             # For workflow_dispatch or push on feature branches
             BASE_TAG="${{ github.ref_name }}"
-            CACHE_TAG="build-cache-${{ github.ref_name }}"
+            CACHE_TAG="build-cache"
           fi
           
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"

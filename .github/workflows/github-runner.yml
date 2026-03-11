@@ -6,6 +6,12 @@ name: Build and Push Cloud Images (GitHub-hosted runners)
 
 on:
   workflow_call:
+    inputs:
+      image_tag:
+        description: "Optional image tag override. When set, overrides the tag derived from branch/event."
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
 
 jobs:
@@ -25,7 +31,9 @@ jobs:
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
           IMAGE_REPO="$(echo "${{ github.repository_owner }}/${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')"
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            BASE_TAG="${{ inputs.image_tag }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE_TAG="pr-${{ github.event.pull_request.number }}"
           elif [[ "${{ github.event_name }}" == "release" ]]; then
             BASE_TAG="${{ github.event.release.tag_name }}"

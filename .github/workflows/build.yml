@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   determine-tag:
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set-eduidec
     outputs:
       base_tag: ${{ steps.set-tag.outputs.base_tag }}
       sha_tag: ${{ steps.set-tag.outputs.sha_tag }}
@@ -72,13 +72,10 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "ubuntu-latest"
-      runner-arm64: "ubuntu-24.04-arm"
+      runner-amd64: "arc-runner-set-eduidec"
+      runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
-      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
-      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
-      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
-      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      registry-mirror: "http://131.159.88.30:30081"
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/landing-page:build-cache
@@ -97,13 +94,10 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "ubuntu-latest"
-      runner-arm64: "ubuntu-24.04-arm"
+      runner-amd64: "arc-runner-set-eduidec"
+      runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
-      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
-      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
-      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
-      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      registry-mirror: "http://131.159.88.30:30081"
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/operator:build-cache
@@ -123,13 +117,10 @@ jobs:
         ${{ needs.determine-tag.outputs.sha_tag }}
       build-amd64: true
       build-arm64: ${{ github.event_name != 'pull_request' }}
-      runner-amd64: "ubuntu-latest"
-      runner-arm64: "ubuntu-24.04-arm"
+      runner-amd64: "arc-runner-set-eduidec"
+      runner-arm64: "arc-runner-set-eduidec-arm64"
       network: host
-      docker-hub-mirror: "http://registry-mirror.registry-mirror.svc.cluster.local:5000"
-      ghcr-mirror: "http://registry-mirror-ghcr.registry-mirror.svc.cluster.local:5000"
-      npm-registry: "http://verdaccio.verdaccio.svc.cluster.local:4873"
-      apt-proxy: "http://apt-cacher-ng.apt-cacher-ng.svc.cluster.local:3142"
+      registry-mirror: "http://131.159.88.30:30081"
       cache-from: |
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:${{ needs.determine-tag.outputs.cache_tag }}
         type=registry,ref=ghcr.io/${{ needs.determine-tag.outputs.image_repo }}/service:build-cache

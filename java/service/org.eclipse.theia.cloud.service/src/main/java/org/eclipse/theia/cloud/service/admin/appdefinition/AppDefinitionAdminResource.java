@@ -15,16 +15,22 @@
  ********************************************************************************/
 package org.eclipse.theia.cloud.service.admin.appdefinition;
 
+import java.util.List;
+import java.util.Optional;
+
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinition;
 import org.eclipse.theia.cloud.common.k8s.resource.appdefinition.AppDefinitionSpec;
-import org.eclipse.theia.cloud.service.AdminOnly;
+import org.eclipse.theia.cloud.service.AdminApiTokenProtected;
 import org.eclipse.theia.cloud.service.ApplicationProperties;
 import org.eclipse.theia.cloud.service.BaseResource;
 import org.eclipse.theia.cloud.service.K8sUtil;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.PATCH;
@@ -37,7 +43,7 @@ import jakarta.ws.rs.core.MediaType;
  * Resource for admin operations on app definitions.
  */
 @Path("/service/admin/appdefinition")
-@AdminOnly
+@AdminApiTokenProtected
 public class AppDefinitionAdminResource extends BaseResource {
 
     @Inject
@@ -48,18 +54,42 @@ public class AppDefinitionAdminResource extends BaseResource {
         super(applicationProperties);
     }
 
+    @Operation(summary = "List scaling settings for all app definitions", description = "Lists minInstances and maxInstances for all app definitions.")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<AppDefinitionScaling> list() {
+        return k8sUtil.listAppDefinitionResources().stream().map(this::toScaling).toList();
+    }
+
+    @Operation(summary = "Get scaling settings for an app definition", description = "Returns minInstances and maxInstances for a specific app definition.")
+    @Parameter(name = "appDefinitionName", description = "The K8S resource name of the app definition.")
+    @GET
+    @Path("/{appDefinitionName}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AppDefinitionScaling get(@PathParam("appDefinitionName") String appDefinitionName) {
+        AppDefinition appDefinition = k8sUtil.getAppDefinition(appDefinitionName)
+                .orElseThrow(() -> new NotFoundException("App definition does not exist."));
+        return toScaling(appDefinition);
+    }
+
     @Operation(summary = "Updates an app definition", description = "Updates an app definition's properties. Allowed properties to update are defined by AppDefinitionUpdateRequest.")
     @Parameter(name = "appDefinitionName", description = "The K8S resource name of the app definition to update.")
     @PATCH
     @Path("/{appDefinitionName}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @RequestBody(required = true)
     public AppDefinition update(@PathParam("appDefinitionName") String appDefinitionName,
             AppDefinitionUpdateRequest request) {
-        String correlationId = evaluateRequest(request);
-        if (!k8sUtil.hasAppDefinition(appDefinitionName)) {
+        if (request == null) {
+            throw new BadRequestException("Request body is required.");
+        }
+        String correlationId = "appdefinition-admin-update";
+        Optional<AppDefinition> appDefinition = k8sUtil.getAppDefinition(appDefinitionName);
+        if (appDefinition.isEmpty()) {
             throw new NotFoundException("App definition does not exist.");
         }
+        validateUpdateRequest(request, appDefinition.get().getSpec());
 
         info(correlationId, "Update app definition " + request);
         try {
@@ -72,10 +102,38 @@ public class AppDefinitionAdminResource extends BaseResource {
                     spec.setMaxInstances(request.maxInstances);
                 }
             });
+        } catch (BadRequestException e) {
+            throw e;
         } catch (Exception e) {
             error(correlationId, "Failed to update app definition ", e);
             throw new InternalServerErrorException(
                     "Failed to update app definition. See the service logs for more details.");
         }
+    }
+
+    private void validateUpdateRequest(AppDefinitionUpdateRequest request, AppDefinitionSpec existingSpec) {
+        if (request.minInstances == null && request.maxInstances == null) {
+            throw new BadRequestException("At least one of minInstances or maxInstances must be set.");
+        }
+
+        int resultingMin = request.minInstances != null ? request.minInstances : existingSpec.getMinInstances();
+        Integer resultingMax = request.maxInstances != null ? request.maxInstances : existingSpec.getMaxInstances();
+
+        if (resultingMin < 0) {
+            throw new BadRequestException("minInstances must be greater than or equal to 0.");
+        }
+        if (resultingMax != null && resultingMax < 0) {
+            throw new BadRequestException("maxInstances must be greater than or equal to 0.");
+        }
+        if (resultingMax != null && resultingMin > resultingMax) {
+            throw new BadRequestException("minInstances must be less than or equal to maxInstances.");
+        }
+    }
+
+    private AppDefinitionScaling toScaling(AppDefinition appDefinition) {
+        String resourceName = appDefinition.getMetadata() != null ? appDefinition.getMetadata().getName() : null;
+        AppDefinitionSpec spec = appDefinition.getSpec();
+        return new AppDefinitionScaling(resourceName != null ? resourceName : spec.getName(), spec.getMinInstances(),
+                spec.getMaxInstances());
     }
 }

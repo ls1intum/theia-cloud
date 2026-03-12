@@ -79,6 +79,10 @@ public final class K8sUtil {
         return CLIENT.appDefinitions().specs();
     }
 
+    public List<AppDefinition> listAppDefinitionResources() {
+        return CLIENT.appDefinitions().list();
+    }
+
     public List<SessionSpec> listSessions(String user) {
         return CLIENT.sessions().specs(user);
     }
@@ -230,7 +234,11 @@ public final class K8sUtil {
     }
 
     public boolean hasAppDefinition(String appDefinition) {
-        return CLIENT.appDefinitions().get(appDefinition).isPresent();
+        return getAppDefinition(appDefinition).isPresent();
+    }
+
+    public Optional<AppDefinition> getAppDefinition(String appDefinition) {
+        return CLIENT.appDefinitions().get(appDefinition);
     }
 
     public AppDefinition editAppDefinition(String correlationId, String appDefinition,

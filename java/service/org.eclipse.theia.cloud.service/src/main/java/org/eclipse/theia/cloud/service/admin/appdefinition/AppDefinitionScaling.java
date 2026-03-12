@@ -1,5 +1,5 @@
 /********************************************************************************
- * Copyright (C) 2025 EclipseSource and others.
+ * Copyright (C) 2026 EclipseSource and others.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0 which is available at
@@ -17,16 +17,24 @@ package org.eclipse.theia.cloud.service.admin.appdefinition;
 
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
-public class AppDefinitionUpdateRequest {
+@Schema(name = "AppDefinitionScaling", description = "Scaling configuration of an app definition.")
+public class AppDefinitionScaling {
 
-    @Schema(description = "The minimum number of instances to run.", required = false)
-    public Integer minInstances;
+    @Schema(description = "The K8S resource name of the app definition.", required = true)
+    public String appDefinitionName;
 
-    @Schema(description = "The maximum number of instances to run.", required = false)
+    @Schema(description = "The minimum number of instances to run.", required = true)
+    public int minInstances;
+
+    @Schema(description = "The maximum number of instances to run. Null means unbounded.", required = false)
     public Integer maxInstances;
 
-    @Override
-    public String toString() {
-        return "AppDefinitionUpdateRequest [minInstances=" + minInstances + ", maxInstances=" + maxInstances + "]";
+    public AppDefinitionScaling() {
+    }
+
+    public AppDefinitionScaling(String appDefinitionName, int minInstances, Integer maxInstances) {
+        this.appDefinitionName = appDefinitionName;
+        this.minInstances = minInstances;
+        this.maxInstances = maxInstances;
     }
 }

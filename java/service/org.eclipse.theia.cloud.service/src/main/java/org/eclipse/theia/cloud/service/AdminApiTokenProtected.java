@@ -1,5 +1,5 @@
 /********************************************************************************
- * Copyright (C) 2025 EclipseSource and others.
+ * Copyright (C) 2026 EclipseSource and others.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0 which is available at
@@ -13,20 +13,24 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
-package org.eclipse.theia.cloud.service.admin.appdefinition;
+package org.eclipse.theia.cloud.service;
 
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import static java.lang.annotation.ElementType.METHOD;
+import static java.lang.annotation.ElementType.TYPE;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
-public class AppDefinitionUpdateRequest {
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
 
-    @Schema(description = "The minimum number of instances to run.", required = false)
-    public Integer minInstances;
+import jakarta.ws.rs.NameBinding;
 
-    @Schema(description = "The maximum number of instances to run.", required = false)
-    public Integer maxInstances;
-
-    @Override
-    public String toString() {
-        return "AppDefinitionUpdateRequest [minInstances=" + minInstances + ", maxInstances=" + maxInstances + "]";
-    }
+/**
+ * Annotation to mark resources protected by an admin API token.
+ */
+@Inherited
+@NameBinding
+@Retention(RUNTIME)
+@Target({ TYPE, METHOD })
+public @interface AdminApiTokenProtected {
 }

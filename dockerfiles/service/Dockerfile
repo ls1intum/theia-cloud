@@ -50,6 +50,7 @@ ENV KEYCLOAK_SERVERURL=https://keycloak.url/auth/realms/TheiaCloud
 ENV KEYCLOAK_CLIENTID=theia-cloud
 ENV KEYCLOAK_CLIENTSECRET=publicbutoauth2proxywantsasecret
 ENV KEYCLOAK_ADMIN_GROUP=theia-cloud/admin
+ENV ADMIN_API_TOKEN=
 
 # If set to true, enables Sentry Java agent flags.
 ENV SENTRY_ENABLE=false
@@ -77,6 +78,7 @@ exec java $JAVA_OPTS \
   -Dtheia.cloud.service.auth.token="${SERVICE_AUTH_TOKEN_EFFECTIVE}" \
   -Dquarkus.http.port="${SERVICE_PORT}" \
   -Dtheia.cloud.auth.admin.group="${KEYCLOAK_ADMIN_GROUP}" \
+  -Dtheia.cloud.admin.api.token="${ADMIN_API_TOKEN}" \
   -Dtheia.cloud.use.keycloak="${KEYCLOAK_ENABLE}" \
   -Dquarkus.oidc.auth-server-url="${KEYCLOAK_SERVERURL}" \
   -Dquarkus.oidc.client-id="${KEYCLOAK_CLIENTID}" \

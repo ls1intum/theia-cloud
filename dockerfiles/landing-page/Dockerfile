@@ -1,7 +1,7 @@
 # This docker file build uses the local common package
 
 # build stage
-FROM node:20-alpine as build-stage
+FROM node:20-alpine AS build-stage
 WORKDIR /app
 COPY node/common/src ./common/src
 COPY node/common/package.json node/common/tsconfig*.json ./common/
@@ -15,7 +15,7 @@ RUN npm ci && \
   chmod 644 /app/landing-page/dist/favicon.ico
 
 # production stage
-FROM nginx:stable-alpine as production-stage
+FROM nginx:stable-alpine AS production-stage
 COPY --from=build-stage /app/landing-page/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

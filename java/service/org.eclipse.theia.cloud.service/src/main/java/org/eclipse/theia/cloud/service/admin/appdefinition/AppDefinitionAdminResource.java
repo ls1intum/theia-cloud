@@ -117,19 +117,15 @@ public class AppDefinitionAdminResource extends BaseResource {
         }
 
         int resultingMin = request.minInstances != null ? request.minInstances : existingSpec.getMinInstances();
-        Integer currentMax = existingSpec.getMaxInstances();
-        // if we don't have a maxInstances in the request or the existing spec, we
-        // cannot guarantee safety of the update and must thus conservatively set it to
-        // 0
-        int resultingMax = request.maxInstances != null ? request.maxInstances : (currentMax != null ? currentMax : 0);
+        Integer resultingMax = request.maxInstances != null ? request.maxInstances : existingSpec.getMaxInstances();
 
         if (resultingMin < 0) {
             throw new BadRequestException("minInstances must be greater than or equal to 0.");
         }
-        if (resultingMax < 0) {
+        if (resultingMax != null && resultingMax < 0) {
             throw new BadRequestException("maxInstances must be greater than or equal to 0.");
         }
-        if (resultingMin > resultingMax) {
+        if (resultingMax != null && resultingMin > resultingMax) {
             throw new BadRequestException("minInstances must be less than or equal to maxInstances.");
         }
     }
@@ -138,6 +134,6 @@ public class AppDefinitionAdminResource extends BaseResource {
         String resourceName = appDefinition.getMetadata() != null ? appDefinition.getMetadata().getName() : null;
         AppDefinitionSpec spec = appDefinition.getSpec();
         return new AppDefinitionScaling(resourceName != null ? resourceName : spec.getName(), spec.getMinInstances(),
-                spec.getMaxInstances() != null ? spec.getMaxInstances() : 0);
+                spec.getMaxInstances());
     }
 }

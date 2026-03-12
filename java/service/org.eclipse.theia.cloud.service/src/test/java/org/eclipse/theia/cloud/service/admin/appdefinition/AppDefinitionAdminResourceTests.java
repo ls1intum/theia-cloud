@@ -72,6 +72,17 @@ class AppDefinitionAdminResourceTests {
     }
 
     @Test
+    void get_unboundedAppDefinition_preservesNullMaxInstances() {
+        Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.of(appDefinition(APP_DEF, 2, null)));
+
+        AppDefinitionScaling result = fixture.get(APP_DEF);
+
+        assertEquals(APP_DEF, result.appDefinitionName);
+        assertEquals(2, result.minInstances);
+        assertEquals(null, result.maxInstances);
+    }
+
+    @Test
     void get_missingAppDefinition_throwsNotFound() {
         Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.empty());
 
@@ -108,6 +119,24 @@ class AppDefinitionAdminResourceTests {
         Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.of(appDefinition(APP_DEF, 1, 5)));
 
         assertThrows(BadRequestException.class, () -> fixture.update(APP_DEF, request));
+    }
+
+    @Test
+    void update_partialUpdateOnUnboundedAppDefinition_allowsHigherMinInstances() {
+        AppDefinitionUpdateRequest request = request(8, null);
+        Mockito.when(k8sUtil.getAppDefinition(APP_DEF)).thenReturn(Optional.of(appDefinition(APP_DEF, 1, null)));
+        Mockito.when(k8sUtil.editAppDefinition(anyString(), eq(APP_DEF), any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Consumer<AppDefinition> editOperation = invocation.getArgument(2, Consumer.class);
+            AppDefinition appDefinition = appDefinition(APP_DEF, 1, null);
+            editOperation.accept(appDefinition);
+            return appDefinition;
+        });
+
+        AppDefinition result = fixture.update(APP_DEF, request);
+
+        assertEquals(8, result.getSpec().getMinInstances());
+        assertEquals(null, result.getSpec().getMaxInstances());
     }
 
     @Test

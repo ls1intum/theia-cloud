@@ -26,13 +26,13 @@ public class AppDefinitionScaling {
     @Schema(description = "The minimum number of instances to run.", required = true)
     public int minInstances;
 
-    @Schema(description = "The maximum number of instances to run.", required = true)
-    public int maxInstances;
+    @Schema(description = "The maximum number of instances to run. Null means unbounded.", required = false)
+    public Integer maxInstances;
 
     public AppDefinitionScaling() {
     }
 
-    public AppDefinitionScaling(String appDefinitionName, int minInstances, int maxInstances) {
+    public AppDefinitionScaling(String appDefinitionName, int minInstances, Integer maxInstances) {
         this.appDefinitionName = appDefinitionName;
         this.minInstances = minInstances;
         this.maxInstances = maxInstances;

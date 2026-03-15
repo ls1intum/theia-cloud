@@ -1,8 +1,6 @@
-# Theia Cloud
+# EduIDE Cloud
 
-[![Try online](https://img.shields.io/badge/Try_Theia_Cloud-online-blue?logo=icloud&logoColor=f5f5f5)](https://try.theia-cloud.io/) [![Website](https://img.shields.io/badge/Website-black?style=flat&color=blue)](https://theia-cloud.io/)
-
-The goal of Theia Cloud is to simplify the deployment of Theia-based (and similar) products on Kubernetes. We follow a convention over configuration approach allowing users to get started fast. At the same time, we aim for extensibility allowing developers to customize all aspects of the kubernetes deployment as required.
+EduIDE Cloud is based on the Theia Cloud project. The goal of EduIDE Cloud is to simplify the deployment of Theia-based (and similar) products on Kubernetes. We follow a convention over configuration approach allowing users to get started fast. At the same time, we aim for extensibility allowing developers to customize all aspects of the kubernetes deployment as required.
 
 For more information, please also visit [our website](https://theia-cloud.io/).
 
@@ -27,6 +25,12 @@ See [Architecture.md](documentation/Architecture.md) for more information on the
 
 This REST Service acts as the API for creating and stopping Theia-based products for an authenticated user as well as providing additional information.\
 The Theia Cloud service creates, modifies, and deletes the custom resources the operator listens to.
+
+#### Scaling admin endpoints
+
+Scaling operations for `AppDefinition` resources are exposed through admin endpoints under `/service/admin/appdefinition`.
+Access is restricted to callers presenting the `X-Admin-Api-Token` header with the token from `theia.cloud.admin.api.token`.
+In Helm-based deployments, provide this token through a pre-created Kubernetes Secret referenced by `service.adminApiTokenSecret`.
 
 ### Sample Dashboard and reusable JS/UI components
 

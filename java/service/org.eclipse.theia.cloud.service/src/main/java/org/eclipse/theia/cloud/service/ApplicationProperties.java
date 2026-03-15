@@ -30,6 +30,7 @@ public class ApplicationProperties {
                                                                           // THEIACLOUD_SERVICE_AUTH_TOKEN
     private static final String THEIACLOUD_USE_KEYCLOAK = "theia.cloud.use.keycloak";
     private static final String THEIACLOUD_ADMIN_GROUP_NAME = "theia.cloud.auth.admin.group";
+    private static final String THEIACLOUD_ADMIN_API_TOKEN = "theia.cloud.admin.api.token";
 
     private static final String DEFAULT_ADMIN_GROUP_NAME = "theia-cloud/admin";
 
@@ -38,11 +39,13 @@ public class ApplicationProperties {
     private final boolean useKeycloak;
     private final String serviceAuthToken;
     private final String adminGroupName;
+    private final String adminApiToken;
 
     public ApplicationProperties() {
         logger = Logger.getLogger(getClass());
         serviceAuthToken = getServiceAuthTokenWithFallback();
         adminGroupName = System.getProperty(THEIACLOUD_ADMIN_GROUP_NAME, DEFAULT_ADMIN_GROUP_NAME);
+        adminApiToken = getAdminApiTokenFromConfig();
         // Only disable keycloak if the value was explicitly set to exactly "false".
         useKeycloak = !"false".equals(System.getProperty(THEIACLOUD_USE_KEYCLOAK));
         if (!useKeycloak) {
@@ -81,6 +84,13 @@ public class ApplicationProperties {
     }
 
     /**
+     * @return configured admin API token or an empty string if not configured.
+     */
+    public String getAdminApiToken() {
+        return adminApiToken;
+    }
+
+    /**
      * Get the service auth token with fallback to deprecated app id property. Logs a deprecation warning if the old
      * property is used.
      */
@@ -98,5 +108,9 @@ public class ApplicationProperties {
         }
 
         return "asdfghjkl"; // Default value
+    }
+
+    private String getAdminApiTokenFromConfig() {
+        return System.getProperty(THEIACLOUD_ADMIN_API_TOKEN, "").trim();
     }
 }
